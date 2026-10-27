@@ -108,49 +108,55 @@ export default function Enrol({ settings }) {
         )}
       </div>
       <div className="enrol-form">
-        <h2>Registar trabalhador</h2>
-        <label>
-          Nome
-          <input value={name} onChange={(e) => setName(e.target.value)} disabled={capturing} />
-        </label>
-        <label>
-          ID (nº mecanográfico / intranet)
-          <input value={workerId} onChange={(e) => setWorkerId(e.target.value)} disabled={capturing} placeholder="opcional" />
-        </label>
-        <p className="muted">
-          O trabalhador deve dar consentimento antes do registo. Só é guardado o vetor do rosto, cifrado neste dispositivo.
-        </p>
-        <button className="btn" disabled={!ready || loading || capturing} onClick={start}>
-          {error ? 'Câmara indisponível' : loading ? 'A carregar modelos…' : capturing ? 'A capturar…' : 'Iniciar captura'}
-        </button>
-        {capturing && (
-          <button className="btn ghost" onClick={() => (runRef.current.active = false)}>
-            Cancelar
+        <div className="card">
+          <h2>Registar trabalhador</h2>
+          <label className="field">
+            Nome
+            <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} disabled={capturing} />
+          </label>
+          <label className="field">
+            ID (nº mecanográfico / intranet)
+            <input className="field-input" value={workerId} onChange={(e) => setWorkerId(e.target.value)} disabled={capturing} placeholder="opcional" />
+          </label>
+          <p className="notice notice-info">
+            O trabalhador deve dar consentimento antes do registo. Só é guardado o vetor do rosto, cifrado neste dispositivo.
+          </p>
+          {(error || msg) && <p className={`notice ${msg.startsWith('✔') ? 'notice-ok' : 'notice-warn'}`}>{error || msg}</p>}
+          <button className="btn btn-primary btn-block" disabled={!ready || loading || capturing} onClick={start}>
+            {error ? 'Câmara indisponível' : loading ? 'A carregar modelos…' : capturing ? 'A capturar…' : 'Iniciar captura'}
           </button>
-        )}
-        {(error || msg) && <p className="msg">{error || msg}</p>}
+          {capturing && (
+            <button className="btn btn-ghost btn-block" onClick={() => (runRef.current.active = false)}>
+              Cancelar
+            </button>
+          )}
+        </div>
 
         <h3>Registados neste tablet ({workers.length})</h3>
-        <ul className="workers">
-          {workers.map((w) => (
-            <li key={w.id}>
-              <span>
-                {w.name} <small className="muted">{w.id} · {w.broken ? 'ilegível — apague e registe de novo' : `${w.embeddings.length} vetores`}</small>
-              </span>
-              <button
-                className="link"
-                onClick={async () => {
-                  if (confirm(`Apagar ${w.name}?`)) {
-                    await deleteWorker(w.id)
-                    refresh()
-                  }
-                }}
-              >
-                apagar
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="card">
+          <ul className="workers">
+            {!workers.length && <li className="muted">Ainda ninguém registado.</li>}
+            {workers.map((w) => (
+              <li key={w.id}>
+                <span>
+                  {w.name}
+                  <small>{w.id} · {w.broken ? 'ilegível — apague e registe de novo' : `${w.embeddings.length} vetores`}</small>
+                </span>
+                <button
+                  className="link-button"
+                  onClick={async () => {
+                    if (confirm(`Apagar ${w.name}?`)) {
+                      await deleteWorker(w.id)
+                      refresh()
+                    }
+                  }}
+                >
+                  apagar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     </div>
   )

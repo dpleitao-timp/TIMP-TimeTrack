@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['timp-logo.png'],
       workbox: {
         // modelos de reconhecimento têm de ficar em cache para funcionar offline
         globPatterns: ['**/*.{js,css,html,svg,json,bin}'],
@@ -20,9 +20,14 @@ export default defineConfig({
         description: 'Picagem por reconhecimento facial (mockup)',
         display: 'fullscreen',
         orientation: 'landscape',
-        background_color: '#0b1220',
-        theme_color: '#0b1220',
-        icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+        background_color: '#f4f5f7',
+        theme_color: '#7e0406',
+        icons: [
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
       },
     }),
   ],

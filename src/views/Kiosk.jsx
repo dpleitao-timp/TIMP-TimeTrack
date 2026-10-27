@@ -7,7 +7,7 @@ import { useCamera } from '../lib/useCamera.js'
 
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
 
-export default function Kiosk({ settings, online }) {
+export default function Kiosk({ settings, online, onDirection }) {
   const videoRef = useRef(null)
   const { ready, error } = useCamera(videoRef)
   const [loading, setLoading] = useState('A carregar modelos…')
@@ -123,23 +123,60 @@ export default function Kiosk({ settings, online }) {
   }, [])
 
   return (
-    <div className={`kiosk ${isIn ? 'in' : 'out'}`}>
-      <video ref={videoRef} muted playsInline className="mirror" />
-      <div className="kiosk-top">
-        <span className="dir">{isIn ? 'ENTRADA' : 'SAÍDA'}</span>
-        <span className="status">
-          <i className={online ? 'dot on' : 'dot off'} /> {online ? 'Online' : 'Offline'} · {pending} por enviar
-        </span>
-      </div>
-      <div className={`banner ${banner.kind}`}>
-        <div className="banner-main">{error || loading || banner.text}</div>
-        {banner.sub && !loading && <div className="banner-sub">{banner.sub}</div>}
-      </div>
-      {debug && (
-        <div className="debug" onClick={() => setDebug(null)}>
-          sim {debug.similarity} · real {debug.real} · live {debug.live}
+    <div className="kiosk-wrap">
+      <div className={`kiosk ${isIn ? 'in' : 'out'}`}>
+        <video ref={videoRef} muted playsInline className="mirror" />
+        <div className="kiosk-top">
+          <span className="dir">{isIn ? 'ENTRADA' : 'SAÍDA'}</span>
+          <span className="header-chip">
+            <i className={online ? 'dot dot-on' : 'dot dot-off'} /> {online ? 'Online' : 'Offline'} · {pending} por enviar
+          </span>
         </div>
-      )}
+        <div className={`banner ${banner.kind}`}>
+          <div className="banner-main">{error || loading || banner.text}</div>
+          {banner.sub && !loading && <div className="banner-sub">{banner.sub}</div>}
+        </div>
+        {debug && (
+          <div className="debug" onClick={() => setDebug(null)}>
+            sim {debug.similarity} · real {debug.real} · live {debug.live}
+          </div>
+        )}
+      </div>
+
+      <div className="kiosk-dock">
+        <div className="dir-switch" role="group" aria-label="Tipo de picagem">
+          <button type="button" className={`dir-btn in ${isIn ? 'on' : ''}`} aria-pressed={isIn} onClick={() => onDirection('in')}>
+            <IconIn />
+            <span>Entrada</span>
+          </button>
+          <button type="button" className={`dir-btn out ${!isIn ? 'on' : ''}`} aria-pressed={!isIn} onClick={() => onDirection('out')}>
+            <IconOut />
+            <span>Saída</span>
+          </button>
+        </div>
+        <img src="/timp-logo.png" alt="TIMP" className="dock-logo" />
+      </div>
     </div>
+  )
+}
+
+// Seta a entrar numa porta / seta a sair de uma porta.
+function IconIn() {
+  return (
+    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3" />
+      <path d="M10 17l5-5-5-5" />
+      <path d="M15 12H3" />
+    </svg>
+  )
+}
+
+function IconOut() {
+  return (
+    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
   )
 }

@@ -11,7 +11,7 @@ npm run build && npm run preview   # PWA com service worker (teste offline)
 ```
 
 ## Ecrãs
-- **Picar** (`#/kiosk`): modo quiosque, direção fixa (Entrada/Saída definida em Definições), deteção de vida (piscar/virar a cabeça), "Olá, <nome> — Entrada 08:02".
+- **Picar** (`#/kiosk`): modo quiosque com botões Entrada/Saída (a escolha fica guardada no dispositivo; sem alternância automática), deteção de vida (piscar/virar a cabeça), "Olá, <nome> — Entrada 08:02".
 - **Registar** (`#/enrol`): captura guiada de 5 poses; só guarda vetores cifrados, nunca fotografias.
 - **Picagens** (`#/punches`): vista local (este tablet) e cloud (login Supabase do chefe de equipa), resumo por trabalhador com picagens sem par, métricas do piloto.
 - **Definições**: direção, limiar de confiança, deteção de vida, intervalo entre picagens, URL/chave Supabase, token do dispositivo.

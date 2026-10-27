@@ -44,15 +44,21 @@ export default function App() {
 
   return (
     <>
-      <nav className="tabs">
-        {TABS.map(([id, label]) => (
-          <a key={id} href={`#/${id}`} className={route === id ? 'on' : ''}>
-            {label}
-          </a>
-        ))}
-        <span className="dev">{settings.deviceName} · {settings.direction === 'in' ? 'Entrada' : 'Saída'}</span>
-      </nav>
-      {route === 'kiosk' && <Kiosk settings={settings} online={online} />}
+      <header className="app-header">
+        <img src="/timp-logo.png" alt="TIMP" className="app-logo" />
+        <nav className="tabs">
+          {TABS.map(([id, label]) => (
+            <a key={id} href={`#/${id}`} className={route === id ? 'tab on' : 'tab'}>
+              {label}
+            </a>
+          ))}
+        </nav>
+        <span className="header-chip">
+          <i className={online ? 'dot dot-on' : 'dot dot-off'} />
+          {settings.deviceName} · {settings.direction === 'in' ? 'Entrada' : 'Saída'}
+        </span>
+      </header>
+      {route === 'kiosk' && <Kiosk settings={settings} online={online} onDirection={(direction) => update({ ...settings, direction })} />}
       {route === 'enrol' && <Enrol settings={settings} />}
       {route === 'punches' && <Punches settings={settings} />}
       {route === 'settings' && <Settings settings={settings} onChange={update} />}

@@ -1,0 +1,25 @@
+{
+  "name": "timp-timetrack",
+  "version": "1.0.0",
+  "description": "Relógio de ponto facial - mockup PWA",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "@vladmandic/human": "^3.3.6",
+    "idb": "^8.0.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "@vladmandic/human-models": "^3.0.4",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0"
+  },
+  "private": true
+}

@@ -1,0 +1,44 @@
+:root { --bg:#0b1220; --panel:#111b2e; --line:#223049; --fg:#e6edf7; --muted:#8a9bb5; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.4 system-ui, sans-serif; }
+.tabs { display:flex; gap:4px; align-items:center; padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--line); height:52px; }
+.tabs a { color:var(--muted); text-decoration:none; padding:8px 14px; border-radius:8px; }
+.tabs a.on { background:var(--bg); color:var(--fg); }
+.tabs .dev { margin-left:auto; color:var(--muted); font-size:14px; }
+
+.kiosk { position:relative; height:calc(100% - 52px); overflow:hidden; background:#000; }
+.kiosk video { width:100%; height:100%; object-fit:cover; }
+.mirror { transform: scaleX(-1); }
+.kiosk-top { position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; padding:14px 18px; background:linear-gradient(#000a, transparent); }
+.kiosk .dir { font-weight:800; font-size:28px; letter-spacing:.1em; }
+.kiosk.in .dir { color:var(--ok); } .kiosk.out .dir { color:var(--warn); }
+.dot { display:inline-block; width:10px; height:10px; border-radius:50%; } .dot.on { background:var(--ok); } .dot.off { background:var(--bad); }
+.banner { position:absolute; left:16px; right:16px; bottom:24px; padding:18px 22px; border-radius:16px; background:#0b1220e6; border:2px solid var(--line); text-align:center; }
+.banner-main { font-size:28px; font-weight:700; } .banner-sub { font-size:22px; margin-top:4px; color:var(--muted); }
+.banner.ok { border-color:var(--ok); background:#052e16ee; } .banner.bad { border-color:var(--bad); } .banner.warn { border-color:var(--warn); }
+.debug { position:absolute; bottom:4px; right:8px; font:12px monospace; color:#fff8; }
+
+.page { padding:16px 20px; max-width:1000px; margin:0 auto; overflow:auto; height:calc(100% - 52px); }
+.enrol { display:grid; grid-template-columns: 1fr 1fr; gap:20px; max-width:1200px; }
+.enrol-cam { position:relative; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:4/3; align-self:start; }
+.enrol-cam video { width:100%; height:100%; object-fit:cover; }
+.enrol-cam .banner { bottom:10px; padding:10px 14px; } .enrol-cam .banner-main { font-size:20px; }
+label { display:block; margin:10px 0; color:var(--muted); font-size:14px; }
+label.check { display:flex; gap:8px; align-items:center; }
+input, select { display:block; width:100%; margin-top:4px; padding:10px 12px; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; font-size:16px; }
+input[type=checkbox] { width:auto; margin:0; } input[type=range] { padding:0; }
+.btn { background:var(--accent); color:#04121f; border:0; padding:12px 20px; border-radius:10px; font-weight:700; font-size:16px; cursor:pointer; margin:8px 8px 8px 0; }
+.btn:disabled { opacity:.5; } .btn.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); } .btn.small { padding:8px 14px; margin:0; }
+.link { background:none; border:0; color:var(--accent); cursor:pointer; }
+.muted { color:var(--muted); font-size:14px; } .msg { color:var(--warn); }
+.workers { list-style:none; padding:0; } .workers li { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); }
+
+.toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; } .toolbar input { width:auto; margin:0; }
+.seg button { padding:8px 14px; background:var(--panel); color:var(--muted); border:1px solid var(--line); cursor:pointer; }
+.seg button.on { background:var(--accent); color:#04121f; }
+.login { display:flex; gap:8px; margin:12px 0; } .login input { margin:0; }
+table { width:100%; border-collapse:collapse; margin-bottom:12px; font-size:14px; }
+th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); } th { color:var(--muted); font-weight:600; }
+td.ok { color:var(--ok); } td.warn-t { color:var(--warn); }
+@media (max-width: 800px) { .enrol { grid-template-columns: 1fr; } }

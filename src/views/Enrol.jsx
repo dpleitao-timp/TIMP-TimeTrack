@@ -21,6 +21,7 @@ export default function Enrol({ settings }) {
   const [step, setStep] = useState(0)
   const [msg, setMsg] = useState('')
   const [loading, setLoading] = useState(true)
+  const [live, setLive] = useState('')
   const [workers, setWorkers] = useState([])
   const runRef = useRef({ active: false })
 
@@ -29,7 +30,9 @@ export default function Enrol({ settings }) {
   useEffect(() => {
     refresh()
     if (!ready) return
-    initHuman().then(() => setLoading(false))
+    initHuman()
+      .then(() => setLoading(false))
+      .catch((e) => setMsg(`Falha a carregar modelos: ${e?.message || e}`))
     return () => {
       runRef.current.active = false
     }
@@ -38,26 +41,40 @@ export default function Enrol({ settings }) {
   async function start() {
     if (!name.trim()) return setMsg('Indique o nome.')
     const id = workerId.trim() || name.trim().toLowerCase().replace(/\s+/g, '-')
-    const existing = await listWorkers()
-    const embeddings = []
-    const st = { firstSide: 0 }
     const run = (runRef.current = { active: true })
     setCapturing(true)
     setMsg('')
     setStep(0)
+    setLive('A iniciar…')
+    try {
+      await capture(id, run)
+    } catch (e) {
+      console.error(e)
+      setMsg(`Erro na captura: ${e?.message || e}`)
+    } finally {
+      setCapturing(false)
+    }
+  }
+
+  async function capture(id, run) {
+    const existing = await listWorkers()
+    const embeddings = []
+    const st = { firstSide: 0 }
 
     let i = 0
     let hold = 0
     while (run.active && i < STEPS.length) {
       const { face } = await detect(videoRef.current)
       const r = face?.rotation?.angle
+      setLive(
+        !face ? 'Rosto não detetado' : !r ? 'Sem pose' : `yaw ${r.yaw.toFixed(2)} · pitch ${r.pitch.toFixed(2)} · score ${face.score.toFixed(2)}`,
+      )
       if (face && r && face.score > 0.7 && STEPS[i].ok(r, st)) hold++
       else hold = 0
       if (hold >= 4) {
         const { worker, similarity } = bestMatch(face.embedding, existing.filter((w) => w.id !== id))
         if (worker && similarity > settings.threshold) {
           setMsg(`Este rosto já está registado como "${worker.name}".`)
-          setCapturing(false)
           return
         }
         if (STEPS[i].side && !st.firstSide) st.firstSide = Math.sign(r.yaw)
@@ -75,7 +92,6 @@ export default function Enrol({ settings }) {
       setWorkerId('')
       refresh()
     }
-    setCapturing(false)
   }
 
   return (
@@ -86,7 +102,7 @@ export default function Enrol({ settings }) {
           <div className="banner warn">
             <div className="banner-main">{STEPS[Math.min(step, STEPS.length - 1)].label}</div>
             <div className="banner-sub">
-              {step}/{STEPS.length}
+              {step}/{STEPS.length} · {live}
             </div>
           </div>
         )}
@@ -105,7 +121,7 @@ export default function Enrol({ settings }) {
           O trabalhador deve dar consentimento antes do registo. Só é guardado o vetor do rosto, cifrado neste dispositivo.
         </p>
         <button className="btn" disabled={!ready || loading || capturing} onClick={start}>
-          {loading ? 'A carregar modelos…' : capturing ? 'A capturar…' : 'Iniciar captura'}
+          {error ? 'Câmara indisponível' : loading ? 'A carregar modelos…' : capturing ? 'A capturar…' : 'Iniciar captura'}
         </button>
         {capturing && (
           <button className="btn ghost" onClick={() => (runRef.current.active = false)}>
@@ -119,7 +135,7 @@ export default function Enrol({ settings }) {
           {workers.map((w) => (
             <li key={w.id}>
               <span>
-                {w.name} <small className="muted">{w.id} · {w.embeddings.length} vetores</small>
+                {w.name} <small className="muted">{w.id} · {w.broken ? 'ilegível — apague e registe de novo' : `${w.embeddings.length} vetores`}</small>
               </span>
               <button
                 className="link"

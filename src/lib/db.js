@@ -14,14 +14,22 @@ function db() {
 }
 
 // --- Encriptação dos vetores (AES-GCM, chave não exportável guardada em IndexedDB) ---
-async function getKey() {
-  const d = await db()
-  let key = await d.get('meta', 'aesKey')
-  if (!key) {
-    key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-    await d.put('meta', key, 'aesKey')
-  }
-  return key
+// A promessa é partilhada: chamadas concorrentes não geram chaves diferentes.
+let keyPromise
+function getKey() {
+  keyPromise ??= (async () => {
+    const d = await db()
+    let key = await d.get('meta', 'aesKey')
+    if (!key) {
+      key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+      await d.put('meta', key, 'aesKey')
+    }
+    return key
+  })().catch((e) => {
+    keyPromise = undefined
+    throw e
+  })
+  return keyPromise
 }
 
 async function encrypt(floats) {
@@ -47,13 +55,16 @@ export async function saveWorker({ id, name, embeddings }) {
 export async function listWorkers() {
   const d = await db()
   const rows = await d.getAll('workers')
+  // Registos que não decifram (ex.: criados com a chave errada) ficam sem vetores
+  // e marcados como `broken`, para poderem ser apagados e registados de novo.
   return Promise.all(
-    rows.map(async (w) => ({
-      id: w.id,
-      name: w.name,
-      createdAt: w.createdAt,
-      embeddings: await Promise.all(w.embeddings.map(decrypt)),
-    })),
+    rows.map(async (w) => {
+      try {
+        return { id: w.id, name: w.name, createdAt: w.createdAt, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
+      } catch {
+        return { id: w.id, name: w.name, createdAt: w.createdAt, embeddings: [], broken: true }
+      }
+    }),
   )
 }
 

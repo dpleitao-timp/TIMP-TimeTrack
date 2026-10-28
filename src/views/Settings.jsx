@@ -11,7 +11,7 @@ export default function Settings({ settings, onChange }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
-    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames) }
+    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin) }
     onChange(next)
     setMsg(t('settings.saved'))
     const r = await flushQueue(next)
@@ -69,6 +69,14 @@ export default function Settings({ settings, onChange }) {
             <input type="range" min="0.3" max="0.9" step="0.01" value={s.threshold} onChange={set('threshold')} />
           </label>
           <label className="field">
+            {t('settings.avgFrames')}
+            <input className="field-input" type="number" min="1" max="10" value={s.avgFrames} onChange={set('avgFrames')} />
+          </label>
+          <label className="field">
+            {t('settings.antispoofMin', { v: Number(s.antispoofMin).toFixed(2) })}
+            <input type="range" min="0" max="0.8" step="0.05" value={s.antispoofMin} onChange={set('antispoofMin')} />
+          </label>
+          <label className="field">
             {t('settings.stableFrames')}
             <input className="field-input" type="number" min="1" max="10" value={s.stableFrames} onChange={set('stableFrames')} />
           </label>
@@ -76,6 +84,15 @@ export default function Settings({ settings, onChange }) {
             {t('settings.cooldown')}
             <input className="field-input" type="number" min="0" value={s.cooldownSec} onChange={set('cooldownSec')} />
           </label>
+          <button type="button" className="switch-row" onClick={() => setS({ ...s, debug: !s.debug })}>
+            <span>
+              {t('settings.debug')}
+              <small>{t('settings.debugHint')}</small>
+            </span>
+            <span className={`switch ${s.debug ? 'on' : ''}`}>
+              <i />
+            </span>
+          </button>
           <button type="button" className="switch-row" onClick={() => setS({ ...s, liveness: !s.liveness })}>
             <span>
               {t('settings.liveness')}

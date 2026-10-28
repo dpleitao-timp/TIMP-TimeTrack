@@ -64,6 +64,24 @@ export function bestMatch(embedding, workers) {
   return best
 }
 
+// Pontuação por trabalhador (a melhor entre os seus vetores), da mais alta para a mais baixa.
+export function rankMatches(embedding, workers) {
+  const scores = []
+  for (const w of workers) {
+    let best = 0
+    for (const e of w.embeddings) best = Math.max(best, human.match.similarity(embedding, e))
+    if (w.embeddings.length) scores.push({ worker: w, similarity: best })
+  }
+  return scores.sort((a, b) => b.similarity - a.similarity)
+}
+
+// Média de vários vetores do mesmo rosto: reduz o ruído de cada fotograma.
+export function meanEmbedding(list) {
+  const out = new Array(list[0].length).fill(0)
+  for (const e of list) for (let i = 0; i < out.length; i++) out[i] += e[i]
+  return out.map((v) => v / list.length)
+}
+
 // Sinais de vida: piscar ou virar a cabeça.
 export function livenessSignals(gestures) {
   const blink = gestures.some((g) => g.includes('blink'))

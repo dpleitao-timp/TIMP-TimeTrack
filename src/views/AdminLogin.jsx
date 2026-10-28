@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { initHuman, detect, bestMatch, livenessSignals, faceQuality } from '../lib/face.js'
+import { initHuman, detect } from '../lib/face.js'
+import { createRecognizer } from '../lib/recognizer.js'
 import { listWorkers } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 import { useT } from '../lib/i18n.jsx'
@@ -22,7 +23,7 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
     if (!ready) return
     let stop = false
     const startedAt = performance.now()
-    let track = null
+    let recognizer = null
     let workers = []
 
     ;(async () => {
@@ -30,6 +31,7 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
       if (stop) return
       setLoading('')
       workers = await listWorkers()
+      recognizer = createRecognizer(() => settingsRef.current, workers)
 
       const loop = async () => {
         if (stop) return
@@ -38,39 +40,32 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
         try {
           const { face, gestures } = await detect(videoRef.current)
           if (stop) return
-          if (!face) {
-            track = null
+          const r = recognizer.push(face, gestures)
+          if (r.status === 'none') {
             setBanner({ kind: 'idle', text: t('kiosk.approach') })
             return requestAnimationFrame(loop)
           }
-          if (!faceQuality(face).ok) {
-            track = null
+          if (r.status === 'collecting' || r.status === 'confirming') {
+            setBanner({ kind: 'idle', text: t('kiosk.recognizing') })
+            return requestAnimationFrame(loop)
+          }
+          if (r.status === 'spoof') {
             setBanner({ kind: 'bad', text: t('kiosk.spoof') })
             return requestAnimationFrame(loop)
           }
-          const { worker, similarity } = bestMatch(face.embedding, workers)
-          if (!worker || similarity < s.threshold) {
-            track = null
+          if (r.status === 'unknown') {
             setBanner({ kind: 'bad', text: t('kiosk.unknown') })
             return requestAnimationFrame(loop)
           }
-          if (worker.role !== 'admin') {
-            track = null
-            setBanner({ kind: 'bad', text: t('admin.notAdmin', { name: worker.name }) })
+          if (r.worker.role !== 'admin') {
+            setBanner({ kind: 'bad', text: t('admin.notAdmin', { name: r.worker.name }) })
             return requestAnimationFrame(loop)
           }
-          if (track?.id === worker.id) track.count++
-          else track = { id: worker.id, count: 1, blink: false, turn: false }
-          const sig = livenessSignals(gestures)
-          track.blink ||= sig.blink
-          track.turn ||= sig.turn
-          if (track.count >= s.stableFrames) {
-            if (s.liveness && !track.blink && !track.turn) {
-              setBanner({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
-            } else {
-              stop = true
-              return cb.current.onUnlock(worker)
-            }
+          if (s.liveness && !r.blink && !r.turn) {
+            setBanner({ kind: 'warn', text: t('kiosk.blink', { name: r.worker.name }) })
+          } else {
+            stop = true
+            return cb.current.onUnlock(r.worker)
           }
         } catch (e) {
           console.error(e)

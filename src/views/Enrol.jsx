@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { initHuman, detect, bestMatch } from '../lib/face.js'
+import { initHuman, detect, bestMatch, meanEmbedding } from '../lib/face.js'
 import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 import { useT } from '../lib/i18n.jsx'
@@ -68,26 +68,29 @@ export default function Enrol({ settings, onRegistered }) {
     const embeddings = []
     const st = { firstSide: 0 }
 
+    // Cada pose guarda a MÉDIA de vários fotogramas seguidos (menos ruído do que um só)
+    const FRAMES = 5
     let i = 0
-    let hold = 0
+    let frames = []
     while (run.active && i < STEPS.length) {
       const { face } = await detect(videoRef.current)
       const r = face?.rotation?.angle
       setLive(
-        !face ? t('enrol.noFace') : !r ? t('enrol.noPose') : `yaw ${r.yaw.toFixed(2)} · pitch ${r.pitch.toFixed(2)} · score ${face.score.toFixed(2)}`,
+        !face ? t('enrol.noFace') : !r ? t('enrol.noPose') : `yaw ${r.yaw.toFixed(2)} · pitch ${r.pitch.toFixed(2)} · score ${face.score.toFixed(2)} · ${frames.length}/${FRAMES}`,
       )
-      if (face && r && face.score > 0.7 && STEPS[i].ok(r, st)) hold++
-      else hold = 0
-      if (hold >= 4) {
-        const { worker, similarity } = bestMatch(face.embedding, existing.filter((w) => w.id !== id))
+      if (face && r && face.score > 0.7 && STEPS[i].ok(r, st)) frames.push(Array.from(face.embedding))
+      else frames = []
+      if (frames.length >= FRAMES) {
+        const avg = meanEmbedding(frames)
+        const { worker, similarity } = bestMatch(avg, existing.filter((w) => w.id !== id))
         if (worker && similarity > settings.threshold) {
           setMsg(t('enrol.faceExists', { name: worker.name }))
           return
         }
         if (STEPS[i].side && !st.firstSide) st.firstSide = Math.sign(r.yaw)
-        embeddings.push(Array.from(face.embedding))
+        embeddings.push(avg)
         i++
-        hold = 0
+        frames = []
         setStep(i)
         await new Promise((res) => setTimeout(res, 600))
       }

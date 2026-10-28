@@ -11,7 +11,10 @@ const DEFAULTS = {
   threshold: 0.55, // similaridade mínima (0..1)
   liveness: true, // exige piscar / virar a cabeça
   cooldownSec: 60, // ignora nova picagem do mesmo trabalhador
-  stableFrames: 3, // frames consecutivos com a mesma identidade
+  stableFrames: 2, // avaliações seguidas com a mesma identidade
+  avgFrames: 5, // fotogramas cuja média decide o reconhecimento
+  antispoofMin: 0.35, // média mínima do anti-foto/vida do modelo (0 desliga)
+  debug: false, // mostra os valores do reconhecimento no ecrã de picar
 }
 
 export function loadSettings() {

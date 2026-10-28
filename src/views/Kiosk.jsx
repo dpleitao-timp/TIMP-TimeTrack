@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { initHuman, detect, bestMatch, livenessSignals, faceQuality } from '../lib/face.js'
+import { initHuman, detect } from '../lib/face.js'
+import { createRecognizer } from '../lib/recognizer.js'
 import { listWorkers, enqueuePunch, pendingPunches } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
@@ -99,7 +100,7 @@ function Scan({ settings, direction, setPending, onDone }) {
     const timers = []
     const startedAt = performance.now()
     let workers = []
-    let track = null // { id, count, blink, turn, start }
+    let recognizer = null
     let pauseUntil = 0
     let lastReject = 0
 
@@ -108,6 +109,7 @@ function Scan({ settings, direction, setPending, onDone }) {
       if (stop) return
       setLoading('')
       workers = await listWorkers()
+      recognizer = createRecognizer(() => settingsRef.current, workers)
       if (!workers.length) setBanner({ kind: 'warn', text: t('kiosk.noWorkers') })
 
       const loop = async () => {
@@ -118,72 +120,65 @@ function Scan({ settings, direction, setPending, onDone }) {
         try {
           const { face, gestures } = await detect(videoRef.current)
           if (stop) return
-          if (!face) {
-            track = null
+          const r = recognizer.push(face, gestures)
+          setDebug(s.debug ? r : null)
+          if (r.status === 'none') {
             setBanner((b) => (b.kind === 'ok' ? b : { kind: 'idle', text: t('kiosk.approach') }))
             return requestAnimationFrame(loop)
           }
-          const q = faceQuality(face)
-          const { worker, similarity } = bestMatch(face.embedding, workers)
-          setDebug({ similarity: similarity.toFixed(2), real: q.real?.toFixed?.(2), live: q.live?.toFixed?.(2) })
-
-          if (!q.ok) {
-            track = null
+          if (r.status === 'collecting' || r.status === 'confirming') {
+            setBanner({ kind: 'idle', text: t('kiosk.recognizing') })
+            return requestAnimationFrame(loop)
+          }
+          if (r.status === 'spoof') {
             if (performance.now() - lastReject > 2000) bumpStat('spoofRejected')
             lastReject = performance.now()
             setBanner({ kind: 'bad', text: t('kiosk.spoof') })
             return requestAnimationFrame(loop)
           }
-          if (!worker || similarity < s.threshold) {
-            if (track || performance.now() - lastReject > 2000) bumpStat('unknown')
+          if (r.status === 'unknown') {
+            if (performance.now() - lastReject > 2000) bumpStat('unknown')
             lastReject = performance.now()
-            track = null
             setBanner({ kind: 'bad', text: t('kiosk.unknown') })
             return requestAnimationFrame(loop)
           }
 
-          if (track?.id === worker.id) track.count++
-          else track = { id: worker.id, count: 1, blink: false, turn: false, start: performance.now() }
-          const sig = livenessSignals(gestures)
-          track.blink ||= sig.blink
-          track.turn ||= sig.turn
-
-          if (track.count >= s.stableFrames) {
-            const alive = !s.liveness || track.blink || track.turn
-            if (!alive) {
-              setBanner({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
-              return requestAnimationFrame(loop)
-            }
-            const last = lastPunch.get(worker.id) || 0
-            if (Date.now() - last < s.cooldownSec * 1000) {
-              setBanner({ kind: 'warn', text: t('kiosk.already', { name: worker.name }) })
-              pauseUntil = performance.now() + 2500
-              track = null
-              return requestAnimationFrame(loop)
-            }
-            const ms = Math.round(performance.now() - track.start)
-            const punch = await enqueuePunch({
-              deviceId: s.deviceId,
-              direction,
-              obra: s.obra.trim(),
-              sageId: worker.id,
-              workerName: worker.name,
-              confidence: similarity,
-            })
-            lastPunch.set(worker.id, Date.now())
-            bumpStat('punches', ms)
-            setBanner({
-              kind: 'ok',
-              text: t('kiosk.hello', { name: worker.name }),
-              sub: `${isIn ? t('dir.in') : t('dir.out')} ${fmtTime(punch.punchedAt, locale)}`,
-            })
-            setPending((await pendingPunches()).length)
-            flushQueue(s).then((r) => setPending(r.pending))
-            track = null
-            pauseUntil = performance.now() + 3500
-            // registado: a câmara desliga e volta ao ecrã de escolha
-            timers.push(setTimeout(() => onDoneRef.current(), 3500))
+          // r.status === 'match': média dos fotogramas coincide com um trabalhador, de forma estável
+          const { worker, similarity } = r
+          const alive = !s.liveness || r.blink || r.turn
+          if (!alive) {
+            setBanner({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
+            return requestAnimationFrame(loop)
           }
+          const last = lastPunch.get(worker.id) || 0
+          if (Date.now() - last < s.cooldownSec * 1000) {
+            setBanner({ kind: 'warn', text: t('kiosk.already', { name: worker.name }) })
+            pauseUntil = performance.now() + 2500
+            recognizer.reset()
+            return requestAnimationFrame(loop)
+          }
+          const ms = Math.round(performance.now() - r.start)
+          const punch = await enqueuePunch({
+            deviceId: s.deviceId,
+            direction,
+            obra: s.obra.trim(),
+            sageId: worker.id,
+            workerName: worker.name,
+            confidence: similarity,
+          })
+          lastPunch.set(worker.id, Date.now())
+          bumpStat('punches', ms)
+          setBanner({
+            kind: 'ok',
+            text: t('kiosk.hello', { name: worker.name }),
+            sub: `${isIn ? t('dir.in') : t('dir.out')} ${fmtTime(punch.punchedAt, locale)}`,
+          })
+          setPending((await pendingPunches()).length)
+          flushQueue(s).then((res) => setPending(res.pending))
+          recognizer.reset()
+          pauseUntil = performance.now() + 3500
+          // registado: a câmara desliga e volta ao ecrã de escolha
+          timers.push(setTimeout(() => onDoneRef.current(), 3500))
         } catch (e) {
           console.error(e)
         }
@@ -214,7 +209,7 @@ function Scan({ settings, direction, setPending, onDone }) {
         </div>
         {debug && (
           <div className="debug" onClick={() => setDebug(null)}>
-            sim {debug.similarity} · real {debug.real} · live {debug.live}
+            {debug.status} · n {debug.frames ?? 0}/{debug.of ?? '-'} · sim {debug.similarity?.toFixed(2) ?? '-'} (2º {debug.second?.toFixed(2) ?? '-'}) · real {debug.real?.toFixed(2) ?? '-'} · live {debug.live?.toFixed(2) ?? '-'}
           </div>
         )}
       </div>

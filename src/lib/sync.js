@@ -1,4 +1,4 @@
-import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced } from './db.js'
+import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending } from './db.js'
 import { isCloudConfigured } from './settings.js'
 
 const BATCH = 50
@@ -16,6 +16,7 @@ export async function flushQueue(settings) {
       const batch = (await pendingPunches()).slice(0, BATCH)
       if (!batch.length) break
       const ids = batch.map((p) => p.eventId)
+      markSending(ids) // enquanto estão a ser enviadas, não se podem apagar
       try {
         const t0 = Date.now()
         const res = await fetch(url, {
@@ -47,6 +48,8 @@ export async function flushQueue(settings) {
       } catch {
         await bumpAttempts(ids)
         break // tenta novamente no próximo ciclo
+      } finally {
+        clearSending(ids)
       }
     }
     await pruneSynced()

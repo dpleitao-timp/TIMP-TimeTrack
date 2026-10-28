@@ -6,10 +6,10 @@ import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
+import { lastPunch } from '../lib/cooldown.js'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
-const lastPunch = new Map() // sageId -> timestamp; fica entre leituras para o intervalo mínimo valer
 
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
 export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending }) {

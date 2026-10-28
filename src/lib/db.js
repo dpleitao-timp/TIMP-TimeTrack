@@ -141,6 +141,29 @@ export async function enqueuePunch({ deviceId, direction, sageId, workerName, ob
   return punch
 }
 
+// Picagens que estão a ser enviadas neste momento: já podem ter chegado ao relay, por isso não se apagam.
+const sending = new Set()
+export const markSending = (ids) => ids.forEach((id) => sending.add(id))
+export const clearSending = (ids) => ids.forEach((id) => sending.delete(id))
+
+// Só se apaga uma picagem antes de ser enviada. Depois de enviada (ou a ser enviada) já não.
+export async function deletePendingPunch(eventId) {
+  const d = await db()
+  const tx = d.transaction('queue', 'readwrite')
+  const row = await tx.store.get(eventId)
+  if (!row) {
+    await tx.done
+    return null
+  }
+  if (row.synced || sending.has(eventId)) {
+    await tx.done
+    throw Object.assign(new Error('A picagem já foi enviada.'), { code: 'ALREADY_SENT' })
+  }
+  await tx.store.delete(eventId)
+  await tx.done
+  return row
+}
+
 export async function listQueue() {
   const d = await db()
   const all = await d.getAll('queue')

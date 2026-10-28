@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { listQueue } from '../lib/db.js'
+import { listQueue, deletePendingPunch } from '../lib/db.js'
 import { loadStats, resetStats } from '../lib/settings.js'
 import { useT } from '../lib/i18n.jsx'
 import { fmtDateTime, localIso } from '../lib/date.js'
 import DateField from './DateField.jsx'
+import { lastPunch } from '../lib/cooldown.js'
 
 const today = () => localIso()
 
@@ -14,6 +15,7 @@ export default function Punches() {
   const [date, setDate] = useState(today())
   const [rows, setRows] = useState([])
   const [stats, setStats] = useState(loadStats())
+  const [msg, setMsg] = useState('')
 
   const load = useCallback(async () => {
     setStats(loadStats())
@@ -26,6 +28,19 @@ export default function Punches() {
     const timer = setInterval(load, 10000)
     return () => clearInterval(timer)
   }, [load])
+
+  async function remove(p) {
+    const who = p.workerName || p.sageId
+    if (!confirm(t('punches.confirmDelete', { name: who, time: fmtDateTime(p.punchedAt) }))) return
+    setMsg('')
+    try {
+      await deletePendingPunch(p.eventId)
+      lastPunch.delete(p.sageId) // o trabalhador pode voltar a picar já, sem esperar o intervalo mínimo
+    } catch (e) {
+      setMsg(e.code === 'ALREADY_SENT' ? t('punches.alreadySent') : String(e.message || e))
+    }
+    load()
+  }
 
   // Resumo por trabalhador: primeira entrada / última saída e picagens sem par.
   const summary = {}
@@ -43,6 +58,8 @@ export default function Punches() {
         <DateField value={date} onChange={setDate} label={t('punches.date')} />
         <button className="btn btn-secondary btn-small" onClick={load}>{t('punches.refresh')}</button>
       </div>
+
+      {msg && <p className="notice notice-warn">{msg}</p>}
 
       <h3>{t('punches.daySummary')}</h3>
       {!Object.keys(summary).length && <p className="empty-text">{t('punches.noneDay')}</p>}
@@ -69,7 +86,7 @@ export default function Punches() {
       <div className="card table-card">
         <table>
           <thead>
-            <tr><th>{t('punches.time')}</th><th>{t('punches.obra')}</th><th>{t('punches.sage')}</th><th>{t('punches.name')}</th><th>{t('punches.direction')}</th><th>{t('punches.device')}</th><th>{t('punches.confidence')}</th><th>{t('punches.sync')}</th></tr>
+            <tr><th>{t('punches.time')}</th><th>{t('punches.obra')}</th><th>{t('punches.sage')}</th><th>{t('punches.name')}</th><th>{t('punches.direction')}</th><th>{t('punches.device')}</th><th>{t('punches.confidence')}</th><th>{t('punches.sync')}</th><th></th></tr>
           </thead>
           <tbody>
             {rows.map((p) => (
@@ -82,9 +99,10 @@ export default function Punches() {
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
                 <td>{p.synced ? '✔' : `⏳ (${p.attempts})`}</td>
+                <td>{p.synced ? <span className="muted" title={t('punches.alreadySent')}>🔒</span> : <button className="link-button" onClick={() => remove(p)}>{t('punches.delete')}</button>}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="8" className="muted">{t('punches.none')}</td></tr>}
+            {!rows.length && <tr><td colSpan="9" className="muted">{t('punches.none')}</td></tr>}
           </tbody>
         </table>
       </div>

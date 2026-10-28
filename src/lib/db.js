@@ -121,7 +121,7 @@ export async function setClockOffset(ms) {
 
 // --- Fila de picagens ---
 // eventId = dispositivo + contador => reenvios idempotentes no servidor.
-export async function enqueuePunch({ deviceId, direction, sageId, workerName, confidence }) {
+export async function enqueuePunch({ deviceId, direction, sageId, workerName, obra, confidence }) {
   const d = await db()
   const counter = await nextCounter()
   const offset = await getClockOffset()
@@ -130,6 +130,7 @@ export async function enqueuePunch({ deviceId, direction, sageId, workerName, co
     deviceId,
     direction,
     sageId,
+    obra, // fica na picagem: mudar a obra nas Definições não altera as já registadas
     workerName, // só local: nunca vai para a cloud
     confidence: Math.round(confidence * 1000) / 1000,
     punchedAt: new Date(Date.now() + offset).toISOString(),

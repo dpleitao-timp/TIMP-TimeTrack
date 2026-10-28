@@ -26,6 +26,7 @@ async function signed(method, path, body = '', opts = {}) {
 const punch = (counter, over = {}) => ({
   eventId: `${DEVICE}-${String(counter).padStart(6, '0')}`,
   sageId: '12345',
+  obra: 'OBRA-TESTE',
   direction: 'in',
   punchedAt: new Date().toISOString(),
   confidence: 0.91,
@@ -57,10 +58,12 @@ r = await post({
     punch(base + 5, { punchedAt: new Date(Date.now() + 3600e3).toISOString() }),
     punch(base + 6, { direction: 'x' }),
     punch(base + 7, { sageId: '  ' }),
+    punch(base + 8, { obra: '' }),
+    punch(base + 9, { obra: undefined }),
   ],
 })
 j = await r.json()
-check('picagens inválidas rejeitadas (ID alheio, futuro, direção, SAGE ID vazio)', j.rejected.length === 4, JSON.stringify(j))
+check('picagens inválidas rejeitadas (ID alheio, futuro, direção, SAGE ID vazio, sem obra)', j.rejected.length === 6, JSON.stringify(j))
 
 // 4. o tablet não consegue ler
 r = await fetch(`${RELAY}/pull?limit=10`, { headers: { 'x-device-token': TOKEN } })
@@ -75,7 +78,7 @@ r = await signed('GET', '/pull?limit=50')
 j = await r.json()
 const mine = (j.punches || []).filter((p) => p.eventId === `${DEVICE}-${String(base).padStart(6, '0')}`)
 check('GET /pull assinado devolve as picagens', r.status === 200 && mine.length === 1, JSON.stringify(j))
-check('picagem só tem SAGE ID e dados do movimento', mine[0] && !('workerName' in mine[0]) && mine[0].sageId === '12345' && mine[0].deviceId === DEVICE)
+check('picagem só tem SAGE ID, obra e dados do movimento', mine[0] && !('workerName' in mine[0]) && mine[0].sageId === '12345' && mine[0].obra === 'OBRA-TESTE' && mine[0].deviceId === DEVICE)
 
 const ids = j.punches.map((p) => p.eventId)
 r = await signed('POST', '/ack', JSON.stringify({ eventIds: ids }))

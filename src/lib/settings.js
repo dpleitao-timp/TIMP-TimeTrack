@@ -2,6 +2,7 @@
 const KEY = 'timp-ponto-settings'
 
 const DEFAULTS = {
+  obra: '', // obra onde está o tablet; vai em todas as picagens
   mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
   deviceName: 'Tablet 1',
   deviceId: '',

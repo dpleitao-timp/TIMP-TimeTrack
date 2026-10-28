@@ -97,6 +97,9 @@ async function handlePunch(request, env) {
       typeof p?.sageId === 'string' &&
       p.sageId.trim() !== '' &&
       p.sageId.length <= 32 &&
+      typeof p?.obra === 'string' &&
+      p.obra.trim() !== '' &&
+      p.obra.length <= 64 &&
       (p.direction === 'in' || p.direction === 'out') &&
       Number.isFinite(t) &&
       t - now < MAX_FUTURE_MS &&
@@ -108,6 +111,7 @@ async function handlePunch(request, env) {
     const payload = JSON.stringify({
       eventId: p.eventId,
       sageId: p.sageId.trim(),
+      obra: p.obra.trim(),
       direction: p.direction,
       punchedAt: new Date(t).toISOString(),
       confidence: typeof p.confidence === 'number' ? p.confidence : null,

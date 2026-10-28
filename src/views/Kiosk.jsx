@@ -53,15 +53,16 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
       <div className="choice">
         <h2 className="choice-title">{t('kiosk.whatToRegister')}</h2>
         <p className="muted">{t('kiosk.chooseToStart')}</p>
+        {!settings.obra?.trim() && <p className="notice notice-warn">{t('kiosk.noObra')}</p>}
         <div className="choice-buttons">
           {settings.mode !== 'out' && (
-            <button type="button" className="choice-btn in" onClick={() => setDirection('in')}>
+            <button type="button" className="choice-btn in" disabled={!settings.obra?.trim()} onClick={() => setDirection('in')}>
               <IconIn size={72} />
               <span>{t('dir.in')}</span>
             </button>
           )}
           {settings.mode !== 'in' && (
-            <button type="button" className="choice-btn out" onClick={() => setDirection('out')}>
+            <button type="button" className="choice-btn out" disabled={!settings.obra?.trim()} onClick={() => setDirection('out')}>
               <IconOut size={72} />
               <span>{t('dir.out')}</span>
             </button>
@@ -164,6 +165,7 @@ function Scan({ settings, direction, setPending, onDone }) {
             const punch = await enqueuePunch({
               deviceId: s.deviceId,
               direction,
+              obra: s.obra.trim(),
               sageId: worker.id,
               workerName: worker.name,
               confidence: similarity,

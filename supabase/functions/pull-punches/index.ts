@@ -69,6 +69,8 @@ Deno.serve(async (req) => {
           p.eventId.startsWith(`${p.deviceId}-`) &&
           typeof p?.sageId === 'string' &&
           p.sageId.trim() !== '' &&
+          typeof p?.obra === 'string' &&
+          p.obra.trim() !== '' &&
           (p.direction === 'in' || p.direction === 'out') &&
           Number.isFinite(t) &&
           t - now < MAX_FUTURE_MS &&
@@ -81,6 +83,7 @@ Deno.serve(async (req) => {
           event_id: p.eventId,
           device_id: p.deviceId,
           sage_id: p.sageId.trim(),
+          obra: p.obra.trim(),
           direction: p.direction,
           punched_at: new Date(t).toISOString(),
           confidence: typeof p.confidence === 'number' ? p.confidence : null,

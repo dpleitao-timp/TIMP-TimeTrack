@@ -2,17 +2,20 @@
   "name": "timp-punch-relay",
   "main": "src/index.js",
   "compatibility_date": "2025-01-01",
+  // o relay só tem o endereço do domínio da TIMP (o deploy cria o DNS e o certificado)
+  "routes": [{ "pattern": "punch-relay.timp-pt.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "timp-punch-relay",
-      // preencher com o id devolvido por: npx wrangler d1 create timp-punch-relay
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "d07caf4e-5734-4a7b-8710-0af2af5dce5c"
     }
   ],
   "vars": {
     // origem da PWA dos tablets (CORS); "*" só para testes
-    "ALLOWED_ORIGIN": "*"
+    "ALLOWED_ORIGIN": "https://timetrack.timp-pt.com"
   }
   // Segredo (não vai para este ficheiro):  npx wrangler secret put PULL_SECRET
 }

@@ -11,7 +11,7 @@ export default function Settings({ settings, onChange }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
-    const next = { ...s, threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames) }
+    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames) }
     onChange(next)
     setMsg(t('settings.saved'))
     const r = await flushQueue(next)
@@ -26,6 +26,11 @@ export default function Settings({ settings, onChange }) {
           <label className="field">
             {t('settings.deviceName')}
             <input className="field-input" value={s.deviceName} onChange={set('deviceName')} />
+          </label>
+          <label className="field">
+            {t('settings.obra')}
+            <input className="field-input" value={s.obra} onChange={set('obra')} maxLength={64} />
+            <small>{t('settings.obraHint')}</small>
           </label>
           <label className="field">
             {t('settings.deviceId')}

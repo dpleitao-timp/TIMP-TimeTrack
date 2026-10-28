@@ -69,12 +69,13 @@ export default function Punches() {
       <div className="card table-card">
         <table>
           <thead>
-            <tr><th>{t('punches.time')}</th><th>{t('punches.sage')}</th><th>{t('punches.name')}</th><th>{t('punches.direction')}</th><th>{t('punches.device')}</th><th>{t('punches.confidence')}</th><th>{t('punches.sync')}</th></tr>
+            <tr><th>{t('punches.time')}</th><th>{t('punches.obra')}</th><th>{t('punches.sage')}</th><th>{t('punches.name')}</th><th>{t('punches.direction')}</th><th>{t('punches.device')}</th><th>{t('punches.confidence')}</th><th>{t('punches.sync')}</th></tr>
           </thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.eventId}>
                 <td>{fmtDateTime(p.punchedAt)}</td>
+                <td>{p.obra}</td>
                 <td>{p.sageId ?? p.workerId}</td>
                 <td>{p.workerName}</td>
                 <td>{p.direction === 'in' ? t('dir.in') : t('dir.out')}</td>
@@ -83,7 +84,7 @@ export default function Punches() {
                 <td>{p.synced ? '✔' : `⏳ (${p.attempts})`}</td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="7" className="muted">{t('punches.none')}</td></tr>}
+            {!rows.length && <tr><td colSpan="8" className="muted">{t('punches.none')}</td></tr>}
           </tbody>
         </table>
       </div>

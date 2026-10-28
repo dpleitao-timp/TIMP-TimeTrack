@@ -1,0 +1,14 @@
+{
+  // App do tablet (PWA) servida como Worker com ficheiros estáticos no domínio da TIMP.
+  // Publicar: npm run deploy:app  (faz o build e o wrangler deploy)
+  "name": "timp-timetrack-app",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  // o domínio (e o registo DNS e o certificado) é criado pelo próprio deploy; a zona tem de estar nesta conta
+  "routes": [{ "pattern": "timetrack.timp-pt.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false
+}

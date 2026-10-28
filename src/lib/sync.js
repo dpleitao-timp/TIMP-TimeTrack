@@ -29,6 +29,7 @@ export async function flushQueue(settings) {
             punches: batch.map((p) => ({
               eventId: p.eventId,
               sageId: p.sageId ?? p.workerId, // registos antigos da fila usavam workerId
+              obra: p.obra ?? '', // picagens antigas sem obra são recusadas pelo relay
               direction: p.direction,
               punchedAt: p.punchedAt,
               confidence: p.confidence,

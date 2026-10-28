@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "deploy:app": "npm run build && wrangler deploy",
+    "deploy:relay": "wrangler deploy --config relay/wrangler.jsonc"
   },
   "type": "module",
   "dependencies": {

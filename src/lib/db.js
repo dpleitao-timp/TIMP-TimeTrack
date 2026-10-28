@@ -46,26 +46,39 @@ async function decrypt({ iv, data }) {
 }
 
 // --- Trabalhadores ---
-export async function saveWorker({ id, name, embeddings }) {
+// role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador.
+export async function saveWorker({ id, name, embeddings, role = 'user' }) {
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
-  await d.put('workers', { id, name, embeddings: enc, createdAt: Date.now() })
+  await d.put('workers', { id, name, role, embeddings: enc, createdAt: Date.now() })
 }
 
 export async function listWorkers() {
   const d = await db()
   const rows = await d.getAll('workers')
+  // Registos anteriores à existência de perfis: o mais antigo passa a Administrador.
+  const oldest = rows.length && !rows.some((w) => w.role === 'admin') ? [...rows].sort((x, y) => x.createdAt - y.createdAt)[0].id : null
   // Registos que não decifram (ex.: criados com a chave errada) ficam sem vetores
   // e marcados como `broken`, para poderem ser apagados e registados de novo.
   return Promise.all(
     rows.map(async (w) => {
+      const base = { id: w.id, name: w.name, createdAt: w.createdAt, role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user' }
       try {
-        return { id: w.id, name: w.name, createdAt: w.createdAt, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
+        return { ...base, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
       } catch {
-        return { id: w.id, name: w.name, createdAt: w.createdAt, embeddings: [], broken: true }
+        return { ...base, embeddings: [], broken: true }
       }
     }),
   )
+}
+
+// Só existe administração protegida se houver um Administrador utilizável (com vetores legíveis).
+export const hasUsableAdmin = (workers) => workers.some((w) => w.role === 'admin' && !w.broken)
+
+export async function setWorkerRole(id, role) {
+  const d = await db()
+  const w = await d.get('workers', id)
+  if (w) await d.put('workers', { ...w, role })
 }
 
 export async function deleteWorker(id) {
@@ -95,7 +108,7 @@ export async function setClockOffset(ms) {
 
 // --- Fila de picagens ---
 // eventId = dispositivo + contador => reenvios idempotentes no servidor.
-export async function enqueuePunch({ deviceId, direction, workerId, workerName, confidence }) {
+export async function enqueuePunch({ deviceId, direction, sageId, workerName, confidence }) {
   const d = await db()
   const counter = await nextCounter()
   const offset = await getClockOffset()
@@ -103,8 +116,8 @@ export async function enqueuePunch({ deviceId, direction, workerId, workerName, 
     eventId: `${deviceId}-${String(counter).padStart(6, '0')}`,
     deviceId,
     direction,
-    workerId,
-    workerName,
+    sageId,
+    workerName, // só local: nunca vai para a cloud
     confidence: Math.round(confidence * 1000) / 1000,
     punchedAt: new Date(Date.now() + offset).toISOString(),
     synced: 0, // 0 = pendente, 1 = enviada (índice simples sem criar index)

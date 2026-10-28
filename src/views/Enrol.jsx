@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, bestMatch } from '../lib/face.js'
-import { saveWorker, listWorkers, deleteWorker } from '../lib/db.js'
+import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 
 // Passos de captura guiada. Cada passo exige uma pose; só o vetor (embedding) é guardado.
@@ -12,11 +12,12 @@ const STEPS = [
   { label: 'Olhe de frente outra vez', ok: (r) => Math.abs(r.yaw) < 0.15 && Math.abs(r.pitch) < 0.15 },
 ]
 
-export default function Enrol({ settings }) {
+export default function Enrol({ settings, onRegistered }) {
   const videoRef = useRef(null)
   const { ready, error } = useCamera(videoRef)
   const [name, setName] = useState('')
-  const [workerId, setWorkerId] = useState('')
+  const [sageId, setSageId] = useState('')
+  const [makeAdmin, setMakeAdmin] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [step, setStep] = useState(0)
   const [msg, setMsg] = useState('')
@@ -26,6 +27,8 @@ export default function Enrol({ settings }) {
   const runRef = useRef({ active: false })
 
   const refresh = async () => setWorkers(await listWorkers())
+  const usableAdmins = workers.filter((w) => w.role === 'admin' && !w.broken).length
+  const firstRegistration = usableAdmins === 0
 
   useEffect(() => {
     refresh()
@@ -39,8 +42,10 @@ export default function Enrol({ settings }) {
   }, [ready])
 
   async function start() {
-    if (!name.trim()) return setMsg('Indique o nome.')
-    const id = workerId.trim() || name.trim().toLowerCase().replace(/\s+/g, '-')
+    const id = sageId.trim()
+    if (!id) return setMsg('Indique o SAGE ID.')
+    if (!name.trim()) return setMsg('Indique o nome do trabalhador.')
+    if (workers.some((w) => w.id === id)) return setMsg(`O SAGE ID ${id} já está registado neste tablet. Apague-o primeiro para registar de novo.`)
     const run = (runRef.current = { active: true })
     setCapturing(true)
     setMsg('')
@@ -86,10 +91,14 @@ export default function Enrol({ settings }) {
       }
     }
     if (run.active && embeddings.length === STEPS.length) {
-      await saveWorker({ id, name: name.trim(), embeddings })
-      setMsg(`✔ ${name.trim()} registado (${embeddings.length} vetores, sem fotografias).`)
+      // o primeiro registo é sempre Administrador; depois, um Administrador pode registar outros
+      const role = !hasUsableAdmin(existing) || makeAdmin ? 'admin' : 'user'
+      await saveWorker({ id, name: name.trim(), role, embeddings })
+      setMsg(`✔ ${name.trim()} registado${role === 'admin' ? ' como Administrador' : ''} (${embeddings.length} vetores, sem fotografias).`)
+      onRegistered?.({ id, name: name.trim(), role })
       setName('')
-      setWorkerId('')
+      setSageId('')
+      setMakeAdmin(false)
       refresh()
     }
   }
@@ -111,13 +120,22 @@ export default function Enrol({ settings }) {
         <div className="card">
           <h2>Registar trabalhador</h2>
           <label className="field">
-            Nome
-            <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} disabled={capturing} />
+            SAGE ID
+            <input className="field-input" value={sageId} onChange={(e) => setSageId(e.target.value)} disabled={capturing} inputMode="numeric" autoComplete="off" />
           </label>
           <label className="field">
-            ID (nº mecanográfico / intranet)
-            <input className="field-input" value={workerId} onChange={(e) => setWorkerId(e.target.value)} disabled={capturing} placeholder="opcional" />
+            Nome do trabalhador
+            <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} disabled={capturing} autoComplete="off" />
           </label>
+          <button type="button" className="switch-row" disabled={capturing || firstRegistration} onClick={() => setMakeAdmin(!makeAdmin)}>
+            <span>
+              Perfil de Administrador
+              <small>{firstRegistration ? 'O primeiro registo é sempre Administrador' : 'Acede a Registar, Picagens e Definições'}</small>
+            </span>
+            <span className={`switch ${makeAdmin || firstRegistration ? 'on' : ''}`}>
+              <i />
+            </span>
+          </button>
           <p className="notice notice-info">
             O trabalhador deve dar consentimento antes do registo. Só é guardado o vetor do rosto, cifrado neste dispositivo.
           </p>
@@ -139,20 +157,39 @@ export default function Enrol({ settings }) {
             {workers.map((w) => (
               <li key={w.id}>
                 <span>
-                  {w.name}
-                  <small>{w.id} · {w.broken ? 'ilegível — apague e registe de novo' : `${w.embeddings.length} vetores`}</small>
+                  {w.name} {w.role === 'admin' && <span className="pill pill-ok">Administrador</span>}
+                  <small>SAGE ID {w.id} · {w.broken ? 'ilegível — apague e registe de novo' : `${w.embeddings.length} vetores`}</small>
                 </span>
-                <button
-                  className="link-button"
-                  onClick={async () => {
-                    if (confirm(`Apagar ${w.name}?`)) {
-                      await deleteWorker(w.id)
-                      refresh()
-                    }
-                  }}
-                >
-                  apagar
-                </button>
+                {w.role === 'admin' && !w.broken && usableAdmins === 1 && workers.length > 1 ? (
+                  <span className="muted">único Administrador</span>
+                ) : (
+                  <span className="btn-row">
+                    {!w.broken && (
+                      <button
+                        className="link-button"
+                        onClick={async () => {
+                          await setWorkerRole(w.id, w.role === 'admin' ? 'user' : 'admin')
+                          await refresh()
+                          onRegistered?.(null)
+                        }}
+                      >
+                        {w.role === 'admin' ? 'remover Administrador' : 'tornar Administrador'}
+                      </button>
+                    )}
+                    <button
+                      className="link-button"
+                      onClick={async () => {
+                        if (confirm(`Apagar ${w.name}?`)) {
+                          await deleteWorker(w.id)
+                          await refresh()
+                          onRegistered?.(null)
+                        }
+                      }}
+                    >
+                      apagar
+                    </button>
+                  </span>
+                )}
               </li>
             ))}
           </ul>

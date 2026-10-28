@@ -46,8 +46,7 @@ export default function Punches({ settings }) {
     setRows(
       data.map((r) => ({
         eventId: r.event_id,
-        workerId: r.worker_id,
-        workerName: r.worker_name,
+        sageId: r.sage_id,
         direction: r.direction,
         punchedAt: r.punched_at,
         deviceId: r.device_id,
@@ -66,7 +65,8 @@ export default function Punches({ settings }) {
   // Resumo por trabalhador: primeira entrada / última saída e picagens sem par.
   const summary = {}
   for (const p of [...rows].sort((a, b) => a.punchedAt.localeCompare(b.punchedAt))) {
-    const s = (summary[p.workerId] ??= { name: p.workerName || p.workerId, ins: [], outs: [] })
+    const sid = p.sageId ?? p.workerId
+    const s = (summary[sid] ??= { name: p.workerName || sid, sageId: sid, ins: [], outs: [] })
     ;(p.direction === 'in' ? s.ins : s.outs).push(p.punchedAt)
   }
 
@@ -129,13 +129,14 @@ export default function Punches({ settings }) {
       <div className="card table-card">
         <table>
           <thead>
-            <tr><th>Hora</th><th>Trabalhador</th><th>Direção</th><th>Dispositivo</th><th>Confiança</th>{source === 'local' && <th>Sync</th>}</tr>
+            <tr><th>Hora</th><th>SAGE ID</th>{source === 'local' && <th>Nome</th>}<th>Direção</th><th>Dispositivo</th><th>Confiança</th>{source === 'local' && <th>Sync</th>}</tr>
           </thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.eventId}>
                 <td>{fmt(p.punchedAt)}</td>
-                <td>{p.workerName || p.workerId}</td>
+                <td>{p.sageId ?? p.workerId}</td>
+                {source === 'local' && <td>{p.workerName}</td>}
                 <td>{p.direction === 'in' ? 'Entrada' : 'Saída'}</td>
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>

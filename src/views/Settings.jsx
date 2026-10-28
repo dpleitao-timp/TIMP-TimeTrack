@@ -30,13 +30,6 @@ export default function Settings({ settings, onChange }) {
             <input className="field-input" value={s.deviceId} onChange={set('deviceId')} />
           </label>
           <label className="field">
-            Direção atual (também escolhida no ecrã Picar)
-            <select className="field-select" value={s.direction} onChange={set('direction')}>
-              <option value="in">Entrada</option>
-              <option value="out">Saída</option>
-            </select>
-          </label>
-          <label className="field">
             Aspeto
             <select
               className="field-select"
@@ -79,18 +72,32 @@ export default function Settings({ settings, onChange }) {
         </div>
 
         <div className="card">
-          <h2>Cloud (Supabase)</h2>
+          <h2>Envio das picagens</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            O tablet só escreve no relay. É o Supabase que vem buscar as picagens; o tablet não tem credenciais do Supabase.
+          </p>
           <label className="field">
-            URL do projeto
+            URL do relay (Cloudflare)
+            <input className="field-input" value={s.relayUrl} onChange={set('relayUrl')} placeholder="https://timp-punch-relay.xxx.workers.dev" />
+          </label>
+          <label className="field">
+            Token do dispositivo
+            <input className="field-input" type="password" value={s.deviceToken} onChange={set('deviceToken')} />
+          </label>
+        </div>
+
+        <div className="card">
+          <h2>Vista do chefe de equipa</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Só leitura, com login. Usa a chave anon (pública) do Supabase; sem login não devolve nada.
+          </p>
+          <label className="field">
+            URL do projeto Supabase
             <input className="field-input" value={s.supabaseUrl} onChange={set('supabaseUrl')} placeholder="https://xxxx.supabase.co" />
           </label>
           <label className="field">
             Chave anon
             <input className="field-input" value={s.supabaseAnonKey} onChange={set('supabaseAnonKey')} />
-          </label>
-          <label className="field">
-            Token do dispositivo
-            <input className="field-input" type="password" value={s.deviceToken} onChange={set('deviceToken')} />
           </label>
         </div>
       </div>

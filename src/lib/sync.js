@@ -4,13 +4,14 @@ import { isCloudConfigured } from './settings.js'
 const BATCH = 50
 let running = false
 
-// Envia a fila para a Edge Function. Seguro chamar repetidamente (idempotente por eventId).
+// Envia a fila para o relay (Cloudflare). O tablet não tem credenciais do Supabase: é o
+// Supabase que vem buscar as picagens ao relay. Seguro chamar repetidamente (idempotente por eventId).
 export async function flushQueue(settings) {
   if (running || !isCloudConfigured(settings) || !navigator.onLine) return { sent: 0, pending: (await pendingPunches()).length }
   running = true
   let sent = 0
   try {
-    const url = `${settings.supabaseUrl.replace(/\/$/, '')}/functions/v1/register-punch`
+    const url = `${settings.relayUrl.replace(/\/$/, '')}/punch`
     for (;;) {
       const batch = (await pendingPunches()).slice(0, BATCH)
       if (!batch.length) break
@@ -22,15 +23,12 @@ export async function flushQueue(settings) {
           headers: {
             'Content-Type': 'application/json',
             'x-device-token': settings.deviceToken,
-            apikey: settings.supabaseAnonKey,
-            Authorization: `Bearer ${settings.supabaseAnonKey}`,
           },
           body: JSON.stringify({
             deviceId: settings.deviceId,
             punches: batch.map((p) => ({
               eventId: p.eventId,
-              workerId: p.workerId,
-              workerName: p.workerName,
+              sageId: p.sageId ?? p.workerId, // registos antigos da fila usavam workerId
               direction: p.direction,
               punchedAt: p.punchedAt,
               confidence: p.confidence,

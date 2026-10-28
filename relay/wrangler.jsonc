@@ -1,0 +1,18 @@
+{
+  "name": "timp-punch-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "timp-punch-relay",
+      // preencher com o id devolvido por: npx wrangler d1 create timp-punch-relay
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "vars": {
+    // origem da PWA dos tablets (CORS); "*" só para testes
+    "ALLOWED_ORIGIN": "*"
+  }
+  // Segredo (não vai para este ficheiro):  npx wrangler secret put PULL_SECRET
+}

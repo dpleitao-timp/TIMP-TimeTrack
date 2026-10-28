@@ -26,13 +26,21 @@ const config = {
 }
 
 let human
-export async function initHuman(onStatus) {
-  if (human) return human
-  human = new Human(config)
+let loadPromise
+// A promessa é partilhada: várias chamadas esperam pelo mesmo carregamento.
+export function initHuman(onStatus) {
+  loadPromise ??= (async () => {
+    const h = new Human(config)
+    await h.load()
+    await h.warmup()
+    human = h
+    return h
+  })().catch((e) => {
+    loadPromise = undefined
+    throw e
+  })
   onStatus?.('A carregar modelos…')
-  await human.load()
-  await human.warmup()
-  return human
+  return loadPromise
 }
 
 export const getHuman = () => human

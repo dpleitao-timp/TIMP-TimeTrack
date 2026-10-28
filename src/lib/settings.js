@@ -1,12 +1,12 @@
-// Definições por dispositivo (localStorage). A direção é fixa por tablet.
+// Definições por dispositivo (localStorage). A direção (Entrada/Saída) escolhe-se no ecrã Picar.
 const KEY = 'timp-ponto-settings'
 
 const DEFAULTS = {
-  direction: 'in', // 'in' | 'out'
   deviceName: 'Tablet 1',
   deviceId: '',
   deviceToken: '',
-  supabaseUrl: '',
+  relayUrl: '', // relay Cloudflare onde o tablet escreve (o Supabase vai lá buscar)
+  supabaseUrl: '', // só para a vista do chefe de equipa (leitura com login)
   supabaseAnonKey: '',
   threshold: 0.55, // similaridade mínima (0..1)
   liveness: true, // exige piscar / virar a cabeça
@@ -61,4 +61,4 @@ export function bumpStat(name, ms) {
 }
 export const resetStats = () => localStorage.removeItem(STATS_KEY)
 
-export const isCloudConfigured = (s) => !!(s.supabaseUrl && s.deviceToken)
+export const isCloudConfigured = (s) => !!(s.relayUrl && s.deviceToken)

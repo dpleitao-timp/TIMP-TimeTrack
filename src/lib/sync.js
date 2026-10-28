@@ -1,4 +1,4 @@
-import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending } from './db.js'
+import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected } from './db.js'
 import { isCloudConfigured } from './settings.js'
 
 const BATCH = 50
@@ -43,8 +43,12 @@ export async function flushQueue(settings) {
           // corrige a hora do dispositivo com a do servidor (compensa meia latência)
           await setClockOffset(new Date(body.serverTime).getTime() - (t0 + Date.now()) / 2)
         }
-        await markSynced(body.accepted ?? ids)
-        sent += (body.accepted ?? ids).length
+        // `accepted` pode incluir as recusadas (relay antigo): só conta como enviado o que não foi recusado
+        const rejected = new Set(body.rejected ?? [])
+        const accepted = (body.accepted ?? ids).filter((id) => !rejected.has(id))
+        await markSynced(accepted)
+        await markRejected(ids.filter((id) => rejected.has(id)))
+        sent += accepted.length
       } catch {
         await bumpAttempts(ids)
         break // tenta novamente no próximo ciclo

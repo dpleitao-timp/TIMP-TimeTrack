@@ -98,7 +98,7 @@ export default function Punches() {
                 <td>{p.direction === 'in' ? t('dir.in') : t('dir.out')}</td>
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
-                <td>{p.synced ? '✔' : `⏳ (${p.attempts})`}</td>
+                <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : `⏳ (${p.attempts})`}</td>
                 <td>{p.synced ? <span className="muted" title={t('punches.alreadySent')}>🔒</span> : <button className="link-button" onClick={() => remove(p)}>{t('punches.delete')}</button>}</td>
               </tr>
             ))}

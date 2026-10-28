@@ -170,8 +170,20 @@ export async function listQueue() {
   return all.sort((a, b) => b.punchedAt.localeCompare(a.punchedAt))
 }
 
+// Por enviar: nem enviadas nem recusadas (uma recusada não volta a ser enviada)
 export async function pendingPunches() {
-  return (await listQueue()).filter((p) => !p.synced).reverse()
+  return (await listQueue()).filter((p) => !p.synced && !p.rejected).reverse()
+}
+
+// O relay recusou estas picagens (dados inválidos): ficam marcadas e visíveis, nunca como enviadas.
+export async function markRejected(eventIds) {
+  const d = await db()
+  const tx = d.transaction('queue', 'readwrite')
+  for (const id of eventIds) {
+    const row = await tx.store.get(id)
+    if (row && !row.synced) await tx.store.put({ ...row, rejected: true })
+  }
+  await tx.done
 }
 
 export async function markSynced(eventIds) {

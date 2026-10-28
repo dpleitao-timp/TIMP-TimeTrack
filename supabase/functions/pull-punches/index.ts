@@ -108,7 +108,8 @@ Deno.serve(async (req) => {
     }
   } catch (e) {
     console.error(e)
-    return new Response(JSON.stringify({ error: 'pull_failed', stored, dropped }), { status: 502 })
+    // a mensagem (p. ex. "relay GET /pull -> HTTP 403") não tem segredos e ajuda a diagnosticar via net._http_response
+    return new Response(JSON.stringify({ error: 'pull_failed', detail: String((e as Error)?.message ?? e).slice(0, 300), stored, dropped }), { status: 502 })
   }
 
   return new Response(JSON.stringify({ stored, dropped }), { headers: { 'Content-Type': 'application/json' } })

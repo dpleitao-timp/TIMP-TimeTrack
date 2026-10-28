@@ -50,7 +50,7 @@ Lê as picagens na app de timesheets/intranet, que consulta a tabela `punches` d
 ## Perfis
 - **Registar, Picagens e Definições** só aparecem a um **Administrador**. Desbloqueia-se em Picar → "🔒 Administração" (reconhecimento facial + deteção de vida); a sessão termina com "Terminar sessão" ou após 5 min sem atividade.
 - O **primeiro trabalhador registado é sempre Administrador** (fica com a sessão aberta nesse momento). Enquanto não houver Administrador utilizável, a administração está aberta para o registar.
-- Pode haver **vários Administradores**: um Administrador regista outros (interruptor "Perfil de Administrador") ou promove/remove o perfil na lista. **Tem de ficar sempre pelo menos um Administrador ativo**: o último não pode ser apagado nem despromovido (a regra está na camada de dados, não só no botão). Um registo de Administrador ilegível não conta como ativo e pode ser apagado.
+- Pode haver **vários Administradores**: um Administrador regista outros (interruptor "Perfil de Administrador") ou promove/remove o perfil na lista. **Tem de ficar sempre pelo menos um Administrador ativo**: o último não pode ser apagado nem despromovido (a regra está na camada de dados, não só no botão). Única exceção: se o Administrador for a única pessoa registada, pode apagar-se (a pedir o SAGE ID) e o tablet volta ao estado inicial. A biometria de qualquer trabalhador pode ser refeita com "atualizar biometria" (mantém SAGE ID e perfil). Um registo de Administrador ilegível não conta como ativo e pode ser apagado.
 - É um controlo de interface no tablet (não impede quem tenha acesso às ferramentas do navegador); a segurança real dos dados está do lado do Supabase.
 
 ## Notas de desenho

@@ -27,7 +27,7 @@ export default function App() {
     const workers = await listWorkers()
     setHasAdmin(hasUsableAdmin(workers))
     // se o Administrador com sessão aberta perdeu o perfil (ou foi apagado), a sessão termina
-    setAdmin((a) => (a && !workers.some((w) => w.id === a.id && w.role === 'admin' && !w.broken) && hasUsableAdmin(workers) ? null : a))
+    setAdmin((a) => (a && !workers.some((w) => w.id === a.id && w.role === 'admin' && !w.broken) ? null : a))
   }, [])
 
   useEffect(() => {

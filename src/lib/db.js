@@ -47,10 +47,10 @@ async function decrypt({ iv, data }) {
 
 // --- Trabalhadores ---
 // role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador.
-export async function saveWorker({ id, name, embeddings, role = 'user' }) {
+export async function saveWorker({ id, name, embeddings, role = 'user', createdAt }) {
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
-  await d.put('workers', { id, name, role, embeddings: enc, createdAt: Date.now() })
+  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now() })
 }
 
 export async function listWorkers() {
@@ -76,9 +76,12 @@ export async function listWorkers() {
 export const hasUsableAdmin = (workers) => workers.some((w) => w.role === 'admin' && !w.broken)
 
 // Tem de ficar sempre pelo menos um Administrador ativo (utilizável): nem se apaga nem se despromove o último.
-async function assertNotLastAdmin(id) {
+// Exceção ao apagar: se o Administrador for a única pessoa registada, pode apagar-se e o tablet volta
+// ao estado inicial (o próximo registo fica Administrador).
+async function assertNotLastAdmin(id, { allowIfOnlyWorker = false } = {}) {
   const workers = await listWorkers()
   const target = workers.find((w) => w.id === id)
+  if (allowIfOnlyWorker && workers.length === 1) return
   if (target?.role === 'admin' && !target.broken && workers.filter((w) => w.role === 'admin' && !w.broken).length === 1) {
     throw Object.assign(new Error('Tem de ficar pelo menos um Administrador ativo.'), { code: 'LAST_ADMIN' })
   }
@@ -94,7 +97,7 @@ export async function setWorkerRole(id, role) {
 }
 
 export async function deleteWorker(id) {
-  await assertNotLastAdmin(id)
+  await assertNotLastAdmin(id, { allowIfOnlyWorker: true })
   const d = await db()
   await d.delete('workers', id)
 }

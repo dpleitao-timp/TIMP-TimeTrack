@@ -20,6 +20,7 @@ export default function Enrol({ settings, onRegistered }) {
   const [name, setName] = useState('')
   const [sageId, setSageId] = useState('')
   const [makeAdmin, setMakeAdmin] = useState(false)
+  const [replacing, setReplacing] = useState(null) // trabalhador cuja biometria está a ser refeita
   const [capturing, setCapturing] = useState(false)
   const [step, setStep] = useState(0)
   const [msg, setMsg] = useState('')
@@ -47,7 +48,7 @@ export default function Enrol({ settings, onRegistered }) {
     const id = sageId.trim()
     if (!id) return setMsg(t('enrol.errSage'))
     if (!name.trim()) return setMsg(t('enrol.errName'))
-    if (workers.some((w) => w.id === id)) return setMsg(t('enrol.errDup', { id }))
+    if (!replacing && workers.some((w) => w.id === id)) return setMsg(t('enrol.errDup', { id }))
     const run = (runRef.current = { active: true })
     setCapturing(true)
     setMsg('')
@@ -96,11 +97,19 @@ export default function Enrol({ settings, onRegistered }) {
       }
     }
     if (run.active && embeddings.length === STEPS.length) {
-      // o primeiro registo é sempre Administrador; depois, um Administrador pode registar outros
-      const role = !hasUsableAdmin(existing) || makeAdmin ? 'admin' : 'user'
-      await saveWorker({ id, name: name.trim(), role, embeddings })
-      setMsg(t(role === 'admin' ? 'enrol.doneAdmin' : 'enrol.done', { name: name.trim(), n: embeddings.length }))
-      onRegistered?.({ id, name: name.trim(), role })
+      if (replacing) {
+        // atualizar a biometria: troca os vetores e mantém SAGE ID, perfil e data de criação
+        await saveWorker({ id, name: name.trim(), role: replacing.role, embeddings, createdAt: replacing.createdAt })
+        setMsg(t('enrol.doneUpdated', { name: name.trim(), n: embeddings.length }))
+        onRegistered?.(null)
+      } else {
+        // o primeiro registo é sempre Administrador; depois, um Administrador pode registar outros
+        const role = !hasUsableAdmin(existing) || makeAdmin ? 'admin' : 'user'
+        await saveWorker({ id, name: name.trim(), role, embeddings })
+        setMsg(t(role === 'admin' ? 'enrol.doneAdmin' : 'enrol.done', { name: name.trim(), n: embeddings.length }))
+        onRegistered?.({ id, name: name.trim(), role })
+      }
+      setReplacing(null)
       setName('')
       setSageId('')
       setMakeAdmin(false)
@@ -123,21 +132,21 @@ export default function Enrol({ settings, onRegistered }) {
       </div>
       <div className="enrol-form">
         <div className="card">
-          <h2>{t('enrol.title')}</h2>
+          <h2>{replacing ? t('enrol.updateTitle', { name: replacing.name }) : t('enrol.title')}</h2>
           <label className="field">
             {t('enrol.sage')}
-            <input className="field-input" value={sageId} onChange={(e) => setSageId(e.target.value)} disabled={capturing} inputMode="numeric" autoComplete="off" />
+            <input className="field-input" value={sageId} onChange={(e) => setSageId(e.target.value)} disabled={capturing || !!replacing} inputMode="numeric" autoComplete="off" />
           </label>
           <label className="field">
             {t('enrol.name')}
             <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} disabled={capturing} autoComplete="off" />
           </label>
-          <button type="button" className="switch-row" disabled={capturing || firstRegistration} onClick={() => setMakeAdmin(!makeAdmin)}>
+          <button type="button" className="switch-row" disabled={capturing || firstRegistration || !!replacing} onClick={() => setMakeAdmin(!makeAdmin)}>
             <span>
               {t('enrol.adminProfile')}
               <small>{firstRegistration ? t('enrol.adminFirst') : t('enrol.adminHint')}</small>
             </span>
-            <span className={`switch ${makeAdmin || firstRegistration ? 'on' : ''}`}>
+            <span className={`switch ${makeAdmin || firstRegistration || replacing?.role === 'admin' ? 'on' : ''}`}>
               <i />
             </span>
           </button>
@@ -146,10 +155,23 @@ export default function Enrol({ settings, onRegistered }) {
           </p>
           {(error || msg) && <p className={`notice ${msg.startsWith('✔') ? 'notice-ok' : 'notice-warn'}`}>{error || msg}</p>}
           <button className="btn btn-primary btn-block" disabled={!ready || loading || capturing} onClick={start}>
-            {error ? t('enrol.cameraUnavailable') : loading ? t('enrol.loadingModels') : capturing ? t('enrol.capturing') : t('enrol.start')}
+            {error ? t('enrol.cameraUnavailable') : loading ? t('enrol.loadingModels') : capturing ? t('enrol.capturing') : replacing ? t('enrol.startUpdate') : t('enrol.start')}
           </button>
           {capturing && (
             <button className="btn btn-ghost btn-block" onClick={() => (runRef.current.active = false)}>
+              {t('enrol.cancel')}
+            </button>
+          )}
+          {replacing && !capturing && (
+            <button
+              className="btn btn-ghost btn-block"
+              onClick={() => {
+                setReplacing(null)
+                setName('')
+                setSageId('')
+                setMsg('')
+              }}
+            >
               {t('enrol.cancel')}
             </button>
           )}
@@ -165,44 +187,78 @@ export default function Enrol({ settings, onRegistered }) {
                   {w.name} {w.role === 'admin' && <span className="pill pill-ok">{t('enrol.adminBadge')}</span>}
                   <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : t('enrol.vectors', { n: w.embeddings.length })}</small>
                 </span>
-                {w.role === 'admin' && !w.broken && usableAdmins === 1 ? (
-                  <span className="muted">{t('enrol.onlyAdmin')}</span>
-                ) : (
-                  <span className="btn-row">
-                    {!w.broken && (
-                      <button
-                        className="link-button"
-                        onClick={async () => {
-                          try {
-                            await setWorkerRole(w.id, w.role === 'admin' ? 'user' : 'admin')
-                          } catch (e) {
-                            return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
-                          }
-                          await refresh()
-                          onRegistered?.(null)
-                        }}
-                      >
-                        {w.role === 'admin' ? t('enrol.removeAdmin') : t('enrol.makeAdmin')}
-                      </button>
-                    )}
+                <span className="btn-row">
+                  <button
+                    className="link-button"
+                    disabled={capturing}
+                    onClick={() => {
+                      setReplacing(w)
+                      setSageId(w.id)
+                      setName(w.name)
+                      setMakeAdmin(w.role === 'admin')
+                      setMsg('')
+                      window.scrollTo?.({ top: 0 })
+                    }}
+                  >
+                    {t('enrol.updateBiometrics')}
+                  </button>
+                  {w.role === 'admin' && !w.broken && usableAdmins === 1 && workers.length > 1 ? (
+                    <span className="muted">{t('enrol.onlyAdmin')}</span>
+                  ) : w.role === 'admin' && !w.broken && usableAdmins === 1 ? (
+                    // único trabalhador e único Administrador: pode apagar-se, com confirmação reforçada (escrever o SAGE ID)
                     <button
                       className="link-button"
                       onClick={async () => {
-                        if (confirm(t('enrol.confirmDelete', { name: w.name }))) {
-                          try {
-                            await deleteWorker(w.id)
-                          } catch (e) {
-                            return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
-                          }
-                          await refresh()
-                          onRegistered?.(null)
+                        const typed = prompt(t('enrol.confirmDeleteAdmin', { name: w.name, id: w.id }))
+                        if (typed === null || typed.trim() !== w.id) return
+                        try {
+                          await deleteWorker(w.id)
+                        } catch (e) {
+                          return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
                         }
+                        await refresh()
+                        onRegistered?.(null)
                       }}
                     >
                       {t('enrol.delete')}
                     </button>
-                  </span>
-                )}
+                  ) : (
+                    <>
+                      {!w.broken && (
+                        <button
+                          className="link-button"
+                          onClick={async () => {
+                            try {
+                              await setWorkerRole(w.id, w.role === 'admin' ? 'user' : 'admin')
+                            } catch (e) {
+                              return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
+                            }
+                            await refresh()
+                            onRegistered?.(null)
+                          }}
+                        >
+                          {w.role === 'admin' ? t('enrol.removeAdmin') : t('enrol.makeAdmin')}
+                        </button>
+                      )}
+                      <button
+                        className="link-button"
+                        onClick={async () => {
+                          if (confirm(t('enrol.confirmDelete', { name: w.name }))) {
+                            try {
+                              await deleteWorker(w.id)
+                            } catch (e) {
+                              return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
+                            }
+                            await refresh()
+                            onRegistered?.(null)
+                          }
+                        }}
+                      >
+                        {t('enrol.delete')}
+                      </button>
+                    </>
+                  )}
+                </span>
               </li>
             ))}
           </ul>

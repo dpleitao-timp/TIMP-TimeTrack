@@ -7,8 +7,6 @@ const DEFAULTS = {
   deviceId: '',
   deviceToken: '',
   relayUrl: '', // relay Cloudflare onde o tablet escreve (o Supabase vai lá buscar)
-  supabaseUrl: '', // só para a vista do chefe de equipa (leitura com login)
-  supabaseAnonKey: '',
   threshold: 0.55, // similaridade mínima (0..1)
   liveness: true, // exige piscar / virar a cabeça
   cooldownSec: 60, // ignora nova picagem do mesmo trabalhador
@@ -23,6 +21,12 @@ export function loadSettings() {
     /* ignora */
   }
   const merged = { ...DEFAULTS, ...s }
+  // o tablet já não tem ligação direta ao Supabase: apaga o que ficou guardado de versões anteriores
+  if ('supabaseUrl' in s || 'supabaseAnonKey' in s) {
+    delete merged.supabaseUrl
+    delete merged.supabaseAnonKey
+    saveSettings(merged)
+  }
   if (!merged.deviceId) {
     merged.deviceId = 'dev-' + crypto.randomUUID().slice(0, 8)
     saveSettings(merged)

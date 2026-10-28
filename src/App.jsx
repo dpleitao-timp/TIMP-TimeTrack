@@ -138,7 +138,7 @@ export default function App() {
         <Kiosk settings={settings} setPending={setPending} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
       )}
       {current === 'enrol' && <Enrol settings={settings} onRegistered={onRegistered} />}
-      {current === 'punches' && <Punches settings={settings} />}
+      {current === 'punches' && <Punches />}
       {current === 'settings' && <Settings settings={settings} onChange={update} />}
     </>
   )

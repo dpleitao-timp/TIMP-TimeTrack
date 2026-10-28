@@ -9,7 +9,6 @@
   },
   "type": "module",
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0",
     "@vladmandic/human": "^3.3.6",
     "idb": "^8.0.4",
     "react": "^19.3.1",

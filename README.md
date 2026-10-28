@@ -13,15 +13,15 @@ npm run build && npm run preview   # PWA com service worker (teste offline)
 ## Ecrãs
 - **Picar** (`#/kiosk`): modo quiosque: primeiro escolhe-se Entrada ou Saída e só então a câmara liga; depois de picar (ou 45 s sem picar, ou "Voltar") a câmara desliga e volta à escolha. Deteção de vida (piscar/virar a cabeça), "Olá, <nome> — Entrada 08:02".
 - **Registar** (`#/enrol`): registo por **SAGE ID + nome**, captura guiada de 5 poses; só guarda vetores cifrados, nunca fotografias.
-- **Picagens** (`#/punches`): vista local (este tablet) e cloud (login Supabase do chefe de equipa), resumo por trabalhador com picagens sem par, métricas do piloto.
-- **Definições**: função do tablet (entradas e saídas, só entradas ou só saídas), aspeto, limiar de confiança, deteção de vida, intervalo entre picagens, URL do relay e token do dispositivo, Supabase (só leitura) para o chefe de equipa.
+- **Picagens** (`#/punches`): picagens guardadas neste tablet, com resumo por trabalhador (picagens sem par) e métricas do piloto. O chefe de equipa vê as picagens na app de timesheets, alimentada pelo Supabase; o tablet não lê dados da cloud.
+- **Definições**: função do tablet (entradas e saídas, só entradas ou só saídas), aspeto, limiar de confiança, deteção de vida, intervalo entre picagens, URL do relay e token do dispositivo.
 - **Idiomas**: PT, FR, EN e DE (seletor sempre visível no cabeçalho; por omissão segue o idioma do navegador). As traduções estão em `src/lib/i18n.jsx`.
 
 ## Como as picagens chegam ao Supabase (o Supabase lê, o tablet só escreve)
 ```
 Tablet ──POST /punch (token do dispositivo)──► Relay Cloudflare (Worker + D1) ◄── GET /pull + POST /ack (HMAC) ── Supabase (pg_cron + Edge Function)
 ```
-O tablet **não tem credenciais nem endereço do Supabase**. Só escreve no relay (acrescentar, idempotente por `eventId`).
+O tablet **não lê nem escreve no Supabase**: não tem credenciais, chave nem endereço dele (nem o cliente do Supabase está na app). Só escreve no relay (acrescentar, idempotente por `eventId`).
 O Supabase vai buscar as picagens ao relay a cada minuto com pedidos assinados (HMAC-SHA256 + data), valida-as de novo, grava em `punches` e só depois confirma (o relay apaga).
 
 ### 1. Relay (Cloudflare)
@@ -42,7 +42,10 @@ Em `wrangler.jsonc`, trocar `ALLOWED_ORIGIN` pelo endereço da PWA. Teste local:
 4. Criar no Vault `punch_pull_url` e `punch_cron_secret` e aplicar `supabase/migrations/002_pull_schedule.sql` (instruções no topo do ficheiro).
 
 ### 3. Tablet
-Em Definições: URL do relay e token do dispositivo. Para a vista do chefe de equipa (só leitura, com login) preencher também URL e chave anon do Supabase.
+Em Definições: URL do relay e token do dispositivo. Nada mais é preciso: o tablet nunca fala com o Supabase.
+
+### 4. Chefe de equipa
+Lê as picagens na app de timesheets/intranet, que consulta a tabela `punches` do Supabase (a policy `punches_select_authenticated` da migração 001 dá acesso de leitura a utilizadores autenticados; convém restringi-la por obra/equipa).
 
 ## Perfis
 - **Registar, Picagens e Definições** só aparecem a um **Administrador**. Desbloqueia-se em Picar → "🔒 Administração" (reconhecimento facial + deteção de vida); a sessão termina com "Terminar sessão" ou após 5 min sem atividade.

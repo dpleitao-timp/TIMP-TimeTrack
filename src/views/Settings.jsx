@@ -96,21 +96,6 @@ export default function Settings({ settings, onChange }) {
             <input className="field-input" type="password" value={s.deviceToken} onChange={set('deviceToken')} />
           </label>
         </div>
-
-        <div className="card">
-          <h2>{t('settings.manager')}</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            {t('settings.managerHint')}
-          </p>
-          <label className="field">
-            {t('settings.supabaseUrl')}
-            <input className="field-input" value={s.supabaseUrl} onChange={set('supabaseUrl')} placeholder="https://xxxx.supabase.co" />
-          </label>
-          <label className="field">
-            {t('settings.anonKey')}
-            <input className="field-input" value={s.supabaseAnonKey} onChange={set('supabaseAnonKey')} />
-          </label>
-        </div>
       </div>
 
       {msg && <p className="notice notice-ok" style={{ marginTop: 14 }}>{msg}</p>}

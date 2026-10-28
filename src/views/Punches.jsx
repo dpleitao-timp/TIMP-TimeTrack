@@ -2,11 +2,13 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { listQueue } from '../lib/db.js'
 import { loadStats, resetStats } from '../lib/settings.js'
+import { useT } from '../lib/i18n.jsx'
 
-const fmt = (iso) => new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'medium' })
 const today = () => new Date().toISOString().slice(0, 10)
 
 export default function Punches({ settings }) {
+  const { t, locale } = useT()
+  const fmt = (iso) => new Date(iso).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'medium' })
   const [source, setSource] = useState('local')
   const [date, setDate] = useState(today())
   const [rows, setRows] = useState([])
@@ -70,24 +72,24 @@ export default function Punches({ settings }) {
     ;(p.direction === 'in' ? s.ins : s.outs).push(p.punchedAt)
   }
 
-  const hm = (t) => new Date(t).toLocaleTimeString('pt-PT', { timeStyle: 'short' })
+  const hm = (x) => new Date(x).toLocaleTimeString(locale, { timeStyle: 'short' })
 
   return (
     <div className="page punches">
       <div className="toolbar">
         <div className="seg">
           <button className={source === 'local' ? 'on' : ''} onClick={() => setSource('local')}>
-            Este tablet
+            {t('punches.local')}
           </button>
           <button className={source === 'cloud' ? 'on' : ''} onClick={() => setSource('cloud')}>
-            Cloud (chefe de equipa)
+            {t('punches.cloud')}
           </button>
         </div>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <button className="btn btn-secondary btn-small" onClick={load}>Atualizar</button>
+        <button className="btn btn-secondary btn-small" onClick={load}>{t('punches.refresh')}</button>
       </div>
 
-      {source === 'cloud' && !client && <p className="notice notice-warn">Configure URL e chave Supabase em Definições.</p>}
+      {source === 'cloud' && !client && <p className="notice notice-warn">{t('punches.configSupabase')}</p>}
       {source === 'cloud' && client && !session && (
         <form
           className="login"
@@ -97,15 +99,15 @@ export default function Punches({ settings }) {
             if (error) setErr(error.message)
           }}
         >
-          <input placeholder="email" value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} />
-          <input type="password" placeholder="palavra-passe" value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} />
-          <button className="btn btn-primary btn-small">Entrar</button>
+          <input placeholder={t('punches.email')} value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} />
+          <input type="password" placeholder={t('punches.password')} value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} />
+          <button className="btn btn-primary btn-small">{t('punches.login')}</button>
         </form>
       )}
       {err && <p className="notice notice-error">{err}</p>}
 
-      <h3>Resumo do dia</h3>
-      {!Object.keys(summary).length && <p className="empty-text">Sem picagens neste dia.</p>}
+      <h3>{t('punches.daySummary')}</h3>
+      {!Object.keys(summary).length && <p className="empty-text">{t('punches.noneDay')}</p>}
       <div className="worker-list">
         {Object.entries(summary).map(([id, s]) => {
           const ok = s.ins.length === s.outs.length && s.ins.length > 0
@@ -114,22 +116,22 @@ export default function Punches({ settings }) {
               <div className="worker-card-top">
                 <h4 className="worker-card-name">{s.name}</h4>
                 <span className={`pill ${ok ? 'pill-ok' : 'pill-warn'}`}>
-                  {ok ? 'Completo' : s.ins.length > s.outs.length ? 'Falta saída' : 'Falta entrada'}
+                  {ok ? t('punches.complete') : s.ins.length > s.outs.length ? t('punches.missingOut') : t('punches.missingIn')}
                 </span>
               </div>
               <div className="worker-card-sub">
-                Entradas: {s.ins.map(hm).join(', ') || '—'} · Saídas: {s.outs.map(hm).join(', ') || '—'}
+                {t('punches.insOuts', { ins: s.ins.map(hm).join(', ') || '—', outs: s.outs.map(hm).join(', ') || '—' })}
               </div>
             </div>
           )
         })}
       </div>
 
-      <h3>Picagens ({rows.length})</h3>
+      <h3>{t('punches.title', { n: rows.length })}</h3>
       <div className="card table-card">
         <table>
           <thead>
-            <tr><th>Hora</th><th>SAGE ID</th>{source === 'local' && <th>Nome</th>}<th>Direção</th><th>Dispositivo</th><th>Confiança</th>{source === 'local' && <th>Sync</th>}</tr>
+            <tr><th>{t('punches.time')}</th><th>{t('punches.sage')}</th>{source === 'local' && <th>{t('punches.name')}</th>}<th>{t('punches.direction')}</th><th>{t('punches.device')}</th><th>{t('punches.confidence')}</th>{source === 'local' && <th>{t('punches.sync')}</th>}</tr>
           </thead>
           <tbody>
             {rows.map((p) => (
@@ -137,23 +139,22 @@ export default function Punches({ settings }) {
                 <td>{fmt(p.punchedAt)}</td>
                 <td>{p.sageId ?? p.workerId}</td>
                 {source === 'local' && <td>{p.workerName}</td>}
-                <td>{p.direction === 'in' ? 'Entrada' : 'Saída'}</td>
+                <td>{p.direction === 'in' ? t('dir.in') : t('dir.out')}</td>
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
                 {source === 'local' && <td>{p.synced ? '✔' : `⏳ (${p.attempts})`}</td>}
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan="6" className="muted">Sem picagens.</td></tr>}
+            {!rows.length && <tr><td colSpan="7" className="muted">{t('punches.none')}</td></tr>}
           </tbody>
         </table>
       </div>
 
-      <h3>Métricas do piloto (neste tablet)</h3>
+      <h3>{t('punches.metrics')}</h3>
       <div className="card">
         <p className="muted" style={{ margin: 0 }}>
-          Picagens: {stats.punches || 0} · tempo médio até picar: {stats.msCount ? Math.round(stats.msTotal / stats.msCount) : '—'} ms · não reconhecidos:{' '}
-          {stats.unknown || 0} · rejeitados (vida/foto): {stats.spoofRejected || 0}{' '}
-          <button className="link-button" onClick={() => { resetStats(); setStats({}) }}>repor</button>
+          {t('punches.metricsText', { punches: stats.punches || 0, ms: stats.msCount ? Math.round(stats.msTotal / stats.msCount) : '—', unknown: stats.unknown || 0, spoof: stats.spoofRejected || 0 })}{' '}
+          <button className="link-button" onClick={() => { resetStats(); setStats({}) }}>{t('punches.reset')}</button>
         </p>
       </div>
     </div>

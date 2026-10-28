@@ -114,12 +114,12 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 /* ---------------------------------------------------------------- header */
 .app-header {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
   padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px;
   flex-shrink: 0;
 }
-.app-logo { height: 30px; width: auto; }
 .app-title { margin: 0; font-size: 1.2rem; }
 .tabs { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
 .tab {
@@ -276,21 +276,18 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 /* ---------------------------------------------------------------- quiosque */
 .kiosk-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 0 12px calc(env(safe-area-inset-bottom, 0px) + 10px); }
 .kiosk { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-lg); background: #000; box-shadow: var(--shadow); }
-.kiosk-dock { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
-.choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; }
-.choice-top { position: absolute; top: 0; right: 0; }
+.kiosk-dock { display: flex; align-items: center; justify-content: center; gap: 12px; flex-shrink: 0; }
+.choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 16px; text-align: center; }
 .choice-title { margin: 0; font-size: 2rem; }
 .choice-buttons { display: flex; gap: 18px; width: 100%; max-width: 720px; margin-top: 18px; }
-.choice-btn { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 220px; border: 0; border-radius: var(--radius-lg); color: #fff; font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25); }
+.choice-btn { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 170px; border: 0; border-radius: var(--radius-lg); color: #fff; font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25); }
 .choice-btn.in { background: var(--ok); }
 .choice-btn.out { background: var(--accent); }
 .choice-btn:active { transform: scale(0.98); }
-.choice-logo { height: 64px; width: auto; margin-top: 18px; }
 .choice-admin { margin-top: 22px; min-height: 48px; }
 .kiosk.admin .dir { background: var(--accent); }
 .header-chip.button { border: 0; color: var(--text); }
 .dock-back { flex: 1; max-width: 420px; }
-.dock-logo { height: 52px; width: auto; flex-shrink: 0; }
 
 /* Logótipo TIMP como marca de água no fundo da app */
 body::before {
@@ -298,7 +295,7 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: url('/timp-logo.png') center / min(70vmin, 520px) no-repeat;
+  background: url('/timp-logo.png') center 30% / min(55vmin, 460px) no-repeat;
   opacity: 0.07;
   pointer-events: none;
 }
@@ -309,7 +306,6 @@ body::before {
 .kiosk .dir { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 99px; font-size: 1.15rem; font-weight: 800; letter-spacing: 0.08em; color: #fff; box-shadow: var(--shadow); }
 .kiosk.in .dir { background: var(--ok); }
 .kiosk.out .dir { background: var(--accent); }
-.kiosk .header-chip { background: rgba(255, 255, 255, 0.92); color: #1c1e21; }
 
 .banner {
   position: absolute;
@@ -345,3 +341,8 @@ body::before {
   .app-title { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .switch, .switch i { transition: none; } }
+
+/* Seletor de idioma */
+.lang-switch { display: flex; gap: 2px; padding: 3px; border-radius: 99px; background: var(--card-bg); box-shadow: var(--shadow); }
+.lang-switch button { min-width: 36px; min-height: 34px; padding: 0 8px; border: 0; border-radius: 99px; background: none; color: var(--text-muted); font-size: 0.78rem; font-weight: 700; }
+.lang-switch button.on { background: var(--accent); color: var(--accent-contrast); }

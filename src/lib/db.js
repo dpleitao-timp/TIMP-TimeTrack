@@ -75,13 +75,26 @@ export async function listWorkers() {
 // Só existe administração protegida se houver um Administrador utilizável (com vetores legíveis).
 export const hasUsableAdmin = (workers) => workers.some((w) => w.role === 'admin' && !w.broken)
 
+// Tem de ficar sempre pelo menos um Administrador ativo (utilizável): nem se apaga nem se despromove o último.
+async function assertNotLastAdmin(id) {
+  const workers = await listWorkers()
+  const target = workers.find((w) => w.id === id)
+  if (target?.role === 'admin' && !target.broken && workers.filter((w) => w.role === 'admin' && !w.broken).length === 1) {
+    throw Object.assign(new Error('Tem de ficar pelo menos um Administrador ativo.'), { code: 'LAST_ADMIN' })
+  }
+}
+
 export async function setWorkerRole(id, role) {
   const d = await db()
   const w = await d.get('workers', id)
-  if (w) await d.put('workers', { ...w, role })
+  if (!w) return
+  if (role !== 'admin') await assertNotLastAdmin(id)
+  // grava também o perfil dos registos antigos (sem campo `role`), para a regra do "mais antigo" não voltar a atuar
+  await d.put('workers', { ...w, role })
 }
 
 export async function deleteWorker(id) {
+  await assertNotLastAdmin(id)
   const d = await db()
   await d.delete('workers', id)
 }

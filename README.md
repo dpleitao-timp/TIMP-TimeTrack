@@ -14,7 +14,8 @@ npm run build && npm run preview   # PWA com service worker (teste offline)
 - **Picar** (`#/kiosk`): modo quiosque: primeiro escolhe-se Entrada ou Saída e só então a câmara liga; depois de picar (ou 45 s sem picar, ou "Voltar") a câmara desliga e volta à escolha. Deteção de vida (piscar/virar a cabeça), "Olá, <nome> — Entrada 08:02".
 - **Registar** (`#/enrol`): registo por **SAGE ID + nome**, captura guiada de 5 poses; só guarda vetores cifrados, nunca fotografias.
 - **Picagens** (`#/punches`): vista local (este tablet) e cloud (login Supabase do chefe de equipa), resumo por trabalhador com picagens sem par, métricas do piloto.
-- **Definições**: direção, limiar de confiança, deteção de vida, intervalo entre picagens, URL do relay e token do dispositivo, Supabase (só leitura) para o chefe de equipa.
+- **Definições**: função do tablet (entradas e saídas, só entradas ou só saídas), aspeto, limiar de confiança, deteção de vida, intervalo entre picagens, URL do relay e token do dispositivo, Supabase (só leitura) para o chefe de equipa.
+- **Idiomas**: PT, FR, EN e DE (seletor sempre visível no cabeçalho; por omissão segue o idioma do navegador). As traduções estão em `src/lib/i18n.jsx`.
 
 ## Como as picagens chegam ao Supabase (o Supabase lê, o tablet só escreve)
 ```
@@ -46,7 +47,7 @@ Em Definições: URL do relay e token do dispositivo. Para a vista do chefe de e
 ## Perfis
 - **Registar, Picagens e Definições** só aparecem a um **Administrador**. Desbloqueia-se em Picar → "🔒 Administração" (reconhecimento facial + deteção de vida); a sessão termina com "Terminar sessão" ou após 5 min sem atividade.
 - O **primeiro trabalhador registado é sempre Administrador** (fica com a sessão aberta nesse momento). Enquanto não houver Administrador utilizável, a administração está aberta para o registar.
-- Pode haver **vários Administradores**: um Administrador regista outros (interruptor "Perfil de Administrador") ou promove/remove o perfil na lista. O único Administrador não pode ser apagado nem despromovido enquanto houver outros trabalhadores registados.
+- Pode haver **vários Administradores**: um Administrador regista outros (interruptor "Perfil de Administrador") ou promove/remove o perfil na lista. **Tem de ficar sempre pelo menos um Administrador ativo**: o último não pode ser apagado nem despromovido (a regra está na camada de dados, não só no botão). Um registo de Administrador ilegível não conta como ativo e pode ser apagado.
 - É um controlo de interface no tablet (não impede quem tenha acesso às ferramentas do navegador); a segurança real dos dados está do lado do Supabase.
 
 ## Notas de desenho

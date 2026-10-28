@@ -4,21 +4,21 @@ import { listWorkers, enqueuePunch, pendingPunches } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
+import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
 
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })
+const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
 const lastPunch = new Map() // sageId -> timestamp; fica entre leituras para o intervalo mínimo valer
 
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
-export default function Kiosk({ settings, online, hasAdmin, onAdminUnlock }) {
+export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending }) {
+  const { t } = useT()
   const [direction, setDirection] = useState(null) // null | 'in' | 'out'
   const [adminLogin, setAdminLogin] = useState(false)
-  const [pending, setPending] = useState(0)
   const [modelsError, setModelsError] = useState('')
 
   useEffect(() => {
-    pendingPunches().then((p) => setPending(p.length))
     // modelos pré-carregados para a câmara reconhecer logo ao ligar (a câmara não é ligada aqui)
     initHuman().catch((e) => setModelsError(e?.message || String(e)))
   }, [])
@@ -41,9 +41,7 @@ export default function Kiosk({ settings, online, hasAdmin, onAdminUnlock }) {
       <Scan
         key={direction}
         settings={settings}
-        online={online}
         direction={direction}
-        pending={pending}
         setPending={setPending}
         onDone={() => setDirection(null)}
       />
@@ -53,40 +51,39 @@ export default function Kiosk({ settings, online, hasAdmin, onAdminUnlock }) {
   return (
     <div className="kiosk-wrap">
       <div className="choice">
-        <div className="choice-top">
-          <span className="header-chip">
-            <i className={online ? 'dot dot-on' : 'dot dot-off'} /> {online ? 'Online' : 'Offline'} · {pending} por enviar
-          </span>
-        </div>
-        <h2 className="choice-title">O que vai registar?</h2>
-        <p className="muted">Escolha para ligar a câmara.</p>
+        <h2 className="choice-title">{t('kiosk.whatToRegister')}</h2>
+        <p className="muted">{t('kiosk.chooseToStart')}</p>
         <div className="choice-buttons">
-          <button type="button" className="choice-btn in" onClick={() => setDirection('in')}>
-            <IconIn size={72} />
-            <span>Entrada</span>
-          </button>
-          <button type="button" className="choice-btn out" onClick={() => setDirection('out')}>
-            <IconOut size={72} />
-            <span>Saída</span>
-          </button>
+          {settings.mode !== 'out' && (
+            <button type="button" className="choice-btn in" onClick={() => setDirection('in')}>
+              <IconIn size={72} />
+              <span>{t('dir.in')}</span>
+            </button>
+          )}
+          {settings.mode !== 'in' && (
+            <button type="button" className="choice-btn out" onClick={() => setDirection('out')}>
+              <IconOut size={72} />
+              <span>{t('dir.out')}</span>
+            </button>
+          )}
         </div>
-        {modelsError && <p className="notice notice-error">Falha a carregar modelos: {modelsError}</p>}
+        {modelsError && <p className="notice notice-error">{t('kiosk.modelsFail', { err: modelsError })}</p>}
         {hasAdmin && (
           <button type="button" className="btn btn-secondary choice-admin" onClick={() => setAdminLogin(true)}>
-            🔒 Administração
+            {t('kiosk.admin')}
           </button>
         )}
-        <img src="/timp-logo.png" alt="TIMP" className="choice-logo" />
       </div>
     </div>
   )
 }
 
-function Scan({ settings, online, direction, pending, setPending, onDone }) {
+function Scan({ settings, direction, setPending, onDone }) {
+  const { t, locale } = useT()
   const videoRef = useRef(null)
   const { ready, error } = useCamera(videoRef)
-  const [loading, setLoading] = useState('A carregar modelos…')
-  const [banner, setBanner] = useState({ kind: 'idle', text: 'Aproxime-se da câmara' })
+  const [loading, setLoading] = useState(t('kiosk.loadingModels'))
+  const [banner, setBanner] = useState({ kind: 'idle', text: t('kiosk.approach') })
   const [debug, setDebug] = useState(null)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
@@ -106,11 +103,11 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
     let lastReject = 0
 
     ;(async () => {
-      await initHuman(setLoading)
+      await initHuman()
       if (stop) return
       setLoading('')
       workers = await listWorkers()
-      if (!workers.length) setBanner({ kind: 'warn', text: 'Sem trabalhadores registados — use "Registar"' })
+      if (!workers.length) setBanner({ kind: 'warn', text: t('kiosk.noWorkers') })
 
       const loop = async () => {
         if (stop) return
@@ -122,7 +119,7 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
           if (stop) return
           if (!face) {
             track = null
-            setBanner((b) => (b.kind === 'ok' ? b : { kind: 'idle', text: 'Aproxime-se da câmara' }))
+            setBanner((b) => (b.kind === 'ok' ? b : { kind: 'idle', text: t('kiosk.approach') }))
             return requestAnimationFrame(loop)
           }
           const q = faceQuality(face)
@@ -133,14 +130,14 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
             track = null
             if (performance.now() - lastReject > 2000) bumpStat('spoofRejected')
             lastReject = performance.now()
-            setBanner({ kind: 'bad', text: 'Rosto não validado (foto/ecrã?)' })
+            setBanner({ kind: 'bad', text: t('kiosk.spoof') })
             return requestAnimationFrame(loop)
           }
           if (!worker || similarity < s.threshold) {
             if (track || performance.now() - lastReject > 2000) bumpStat('unknown')
             lastReject = performance.now()
             track = null
-            setBanner({ kind: 'bad', text: 'Não reconhecido' })
+            setBanner({ kind: 'bad', text: t('kiosk.unknown') })
             return requestAnimationFrame(loop)
           }
 
@@ -153,12 +150,12 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
           if (track.count >= s.stableFrames) {
             const alive = !s.liveness || track.blink || track.turn
             if (!alive) {
-              setBanner({ kind: 'warn', text: `${worker.name} — pisque os olhos ou vire a cabeça` })
+              setBanner({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
               return requestAnimationFrame(loop)
             }
             const last = lastPunch.get(worker.id) || 0
             if (Date.now() - last < s.cooldownSec * 1000) {
-              setBanner({ kind: 'warn', text: `${worker.name} — já picou há instantes` })
+              setBanner({ kind: 'warn', text: t('kiosk.already', { name: worker.name }) })
               pauseUntil = performance.now() + 2500
               track = null
               return requestAnimationFrame(loop)
@@ -175,8 +172,8 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
             bumpStat('punches', ms)
             setBanner({
               kind: 'ok',
-              text: `Olá, ${worker.name}`,
-              sub: `${isIn ? 'Entrada' : 'Saída'} ${fmtTime(punch.punchedAt)}`,
+              text: t('kiosk.hello', { name: worker.name }),
+              sub: `${isIn ? t('dir.in') : t('dir.out')} ${fmtTime(punch.punchedAt, locale)}`,
             })
             setPending((await pendingPunches()).length)
             flushQueue(s).then((r) => setPending(r.pending))
@@ -206,10 +203,7 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
         <div className="kiosk-top">
           <span className="dir">
             {isIn ? <IconIn size={26} /> : <IconOut size={26} />}
-            {isIn ? 'ENTRADA' : 'SAÍDA'}
-          </span>
-          <span className="header-chip">
-            <i className={online ? 'dot dot-on' : 'dot dot-off'} /> {online ? 'Online' : 'Offline'} · {pending} por enviar
+            {(isIn ? t('dir.in') : t('dir.out')).toLocaleUpperCase(locale)}
           </span>
         </div>
         <div className={`banner ${banner.kind}`}>
@@ -225,9 +219,8 @@ function Scan({ settings, online, direction, pending, setPending, onDone }) {
 
       <div className="kiosk-dock">
         <button type="button" className="btn btn-secondary dock-back" onClick={onDone}>
-          ← Voltar (desligar câmara)
+          {t('kiosk.back')}
         </button>
-        <img src="/timp-logo.png" alt="TIMP" className="dock-logo" />
       </div>
     </div>
   )

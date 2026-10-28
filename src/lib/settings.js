@@ -2,6 +2,7 @@
 const KEY = 'timp-ponto-settings'
 
 const DEFAULTS = {
+  mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
   deviceName: 'Tablet 1',
   deviceId: '',
   deviceToken: '',

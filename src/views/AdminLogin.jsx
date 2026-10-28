@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, bestMatch, livenessSignals, faceQuality } from '../lib/face.js'
 import { listWorkers } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
+import { useT } from '../lib/i18n.jsx'
 
 const TIMEOUT_MS = 45000
 
 // Acesso à administração por reconhecimento facial: só desbloqueia um Administrador.
 export default function AdminLogin({ settings, onUnlock, onCancel }) {
+  const { t } = useT()
   const videoRef = useRef(null)
   const { ready, error } = useCamera(videoRef)
-  const [loading, setLoading] = useState('A carregar modelos…')
-  const [banner, setBanner] = useState({ kind: 'idle', text: 'Aproxime-se da câmara' })
+  const [loading, setLoading] = useState(t('kiosk.loadingModels'))
+  const [banner, setBanner] = useState({ kind: 'idle', text: t('kiosk.approach') })
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const cb = useRef({ onUnlock, onCancel })
@@ -24,7 +26,7 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
     let workers = []
 
     ;(async () => {
-      await initHuman(setLoading)
+      await initHuman()
       if (stop) return
       setLoading('')
       workers = await listWorkers()
@@ -38,23 +40,23 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
           if (stop) return
           if (!face) {
             track = null
-            setBanner({ kind: 'idle', text: 'Aproxime-se da câmara' })
+            setBanner({ kind: 'idle', text: t('kiosk.approach') })
             return requestAnimationFrame(loop)
           }
           if (!faceQuality(face).ok) {
             track = null
-            setBanner({ kind: 'bad', text: 'Rosto não validado (foto/ecrã?)' })
+            setBanner({ kind: 'bad', text: t('kiosk.spoof') })
             return requestAnimationFrame(loop)
           }
           const { worker, similarity } = bestMatch(face.embedding, workers)
           if (!worker || similarity < s.threshold) {
             track = null
-            setBanner({ kind: 'bad', text: 'Não reconhecido' })
+            setBanner({ kind: 'bad', text: t('kiosk.unknown') })
             return requestAnimationFrame(loop)
           }
           if (worker.role !== 'admin') {
             track = null
-            setBanner({ kind: 'bad', text: `${worker.name} — sem perfil de Administrador` })
+            setBanner({ kind: 'bad', text: t('admin.notAdmin', { name: worker.name }) })
             return requestAnimationFrame(loop)
           }
           if (track?.id === worker.id) track.count++
@@ -64,7 +66,7 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
           track.turn ||= sig.turn
           if (track.count >= s.stableFrames) {
             if (s.liveness && !track.blink && !track.turn) {
-              setBanner({ kind: 'warn', text: `${worker.name} — pisque os olhos ou vire a cabeça` })
+              setBanner({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
             } else {
               stop = true
               return cb.current.onUnlock(worker)
@@ -88,18 +90,17 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
       <div className="kiosk admin">
         <video ref={videoRef} muted playsInline className="mirror" />
         <div className="kiosk-top">
-          <span className="dir">🔒 ADMINISTRAÇÃO</span>
+          <span className="dir">🔒 {t('admin.title')}</span>
         </div>
         <div className={`banner ${banner.kind}`}>
           <div className="banner-main">{error || loading || banner.text}</div>
-          {!loading && !error && <div className="banner-sub">Reconhecimento do Administrador</div>}
+          {!loading && !error && <div className="banner-sub">{t('admin.sub')}</div>}
         </div>
       </div>
       <div className="kiosk-dock">
         <button type="button" className="btn btn-secondary dock-back" onClick={onCancel}>
-          ← Voltar (desligar câmara)
+          {t('kiosk.back')}
         </button>
-        <img src="/timp-logo.png" alt="TIMP" className="dock-logo" />
       </div>
     </div>
   )

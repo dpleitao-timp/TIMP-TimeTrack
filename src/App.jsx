@@ -5,25 +5,23 @@ import Punches from './views/Punches.jsx'
 import Settings from './views/Settings.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync } from './lib/sync.js'
-import { listWorkers, hasUsableAdmin } from './lib/db.js'
+import { listWorkers, hasUsableAdmin, pendingPunches } from './lib/db.js'
+import { useT, LanguageSwitch } from './lib/i18n.jsx'
 
 // Só o Administrador acede a estes separadores.
-const ADMIN_TABS = [
-  ['enrol', 'Registar'],
-  ['punches', 'Picagens'],
-  ['settings', 'Definições'],
-]
-const ADMIN_ROUTES = ADMIN_TABS.map(([id]) => id)
+const ADMIN_TABS = ['enrol', 'punches', 'settings']
 const ADMIN_IDLE_MS = 5 * 60 * 1000 // a sessão de administrador termina sem atividade
 
 const routeFromHash = () => (location.hash.replace('#/', '') || 'kiosk').split('?')[0]
 
 export default function App() {
+  const { t } = useT()
   const [route, setRoute] = useState(routeFromHash())
   const [settings, setSettings] = useState(loadSettings)
   const [online, setOnline] = useState(navigator.onLine)
   const [hasAdmin, setHasAdmin] = useState(null) // null = a verificar
   const [admin, setAdmin] = useState(null) // sessão: { id, name }
+  const [pending, setPending] = useState(0) // picagens por enviar
 
   const refreshAdmin = useCallback(async () => {
     const workers = await listWorkers()
@@ -51,7 +49,15 @@ export default function App() {
   }, [])
 
   // reenvio automático da fila (lê sempre as definições mais recentes)
-  useEffect(() => startAutoSync(() => loadSettings()), [])
+  useEffect(() => startAutoSync(() => loadSettings(), (r) => setPending(r.pending)), [])
+
+  // contador de picagens por enviar, sempre visível no cabeçalho
+  useEffect(() => {
+    const load = () => pendingPunches().then((p) => setPending(p.length))
+    load()
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
+  }, [])
 
   // Sem Administrador registado (primeiro arranque) a administração está aberta, para registar o primeiro.
   const unlocked = hasAdmin === false || !!admin
@@ -79,7 +85,7 @@ export default function App() {
   }, [admin, logout])
 
   // acesso direto por endereço a uma área protegida volta ao ecrã de picagem
-  const blocked = ADMIN_ROUTES.includes(route) && hasAdmin !== null && !unlocked
+  const blocked = ADMIN_TABS.includes(route) && hasAdmin !== null && !unlocked
   useEffect(() => {
     if (blocked) location.hash = '#/kiosk'
   }, [blocked])
@@ -101,35 +107,35 @@ export default function App() {
   return (
     <>
       <header className="app-header">
-        <img src="/timp-logo.png" alt="TIMP" className="app-logo" />
         <nav className="tabs">
           <a href="#/kiosk" className={current === 'kiosk' ? 'tab on' : 'tab'}>
-            Picar
+            {t('nav.kiosk')}
           </a>
           {unlocked &&
-            ADMIN_TABS.map(([id, label]) => (
+            ADMIN_TABS.map((id) => (
               <a key={id} href={`#/${id}`} className={current === id ? 'tab on' : 'tab'}>
-                {label}
+                {t(`nav.${id}`)}
               </a>
             ))}
         </nav>
         {admin && (
           <button type="button" className="header-chip button" onClick={logout}>
-            🔓 {admin.name} · Terminar sessão
+            🔓 {admin.name} · {t('app.endSession')}
           </button>
         )}
+        <LanguageSwitch />
         <span className="header-chip">
           <i className={online ? 'dot dot-on' : 'dot dot-off'} />
-          {settings.deviceName}
+          {settings.deviceName} · {online ? t('kiosk.online') : t('kiosk.offline')} · {t('kiosk.pendingSend', { n: pending })}
         </span>
       </header>
       {hasAdmin === false && !admin && (
         <p className="notice notice-warn" style={{ margin: '0 16px 8px' }}>
-          Ainda não há Administrador. O primeiro trabalhador registado em "Registar" fica Administrador e só ele acede depois a Registar, Picagens e Definições.
+          {t('app.noAdmin')}
         </p>
       )}
       {current === 'kiosk' && (
-        <Kiosk settings={settings} online={online} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
+        <Kiosk settings={settings} setPending={setPending} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
       )}
       {current === 'enrol' && <Enrol settings={settings} onRegistered={onRegistered} />}
       {current === 'punches' && <Punches settings={settings} />}

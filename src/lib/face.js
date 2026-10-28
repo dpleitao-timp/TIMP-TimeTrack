@@ -39,7 +39,6 @@ export function initHuman(onStatus) {
     loadPromise = undefined
     throw e
   })
-  onStatus?.('A carregar modelos…')
   return loadPromise
 }
 

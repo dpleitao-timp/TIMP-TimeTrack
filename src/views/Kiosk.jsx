@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
+import { useModelsReady } from '../lib/useModels.js'
 import { listWorkers, enqueuePunch, pendingPunches } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
@@ -10,6 +11,7 @@ import AdminLogin from './AdminLogin.jsx'
 import { lastPunch } from '../lib/cooldown.js'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+const FAST_REAL = 0.8 // confiança mínima do anti-foto para dispensar o piscar no modo rápido
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
 
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
@@ -18,6 +20,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
   const [direction, setDirection] = useState(null) // null | 'in' | 'out'
   const [adminLogin, setAdminLogin] = useState(false)
   const [modelsError, setModelsError] = useState('')
+  const modelsState = useModelsReady()
 
   useEffect(() => {
     // modelos pré-carregados para a câmara reconhecer logo ao ligar (a câmara não é ligada aqui)
@@ -54,6 +57,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
       <div className="choice">
         <h2 className="choice-title">{t('kiosk.whatToRegister')}</h2>
         <p className="muted">{t('kiosk.chooseToStart')}</p>
+        {modelsState === 'loading' && <p className="muted preparing">⏳ {t('kiosk.preparing')}</p>}
         {!settings.obra?.trim() && <p className="notice notice-warn">{t('kiosk.noObra')}</p>}
         <div className="choice-buttons">
           {settings.mode !== 'out' && (
@@ -83,9 +87,10 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
 function Scan({ settings, direction, setPending, onDone }) {
   const { t, locale } = useT()
   const videoRef = useRef(null)
-  const { ready, error } = useCamera(videoRef)
+  const { ready, error } = useCamera(videoRef, { deviceId: settings.cameraId })
   const [loading, setLoading] = useState(t('kiosk.loadingModels'))
   const [banner, setBanner] = useState({ kind: 'idle', text: t('kiosk.approach') })
+  const show = (b) => setBanner((cur) => (cur.kind === b.kind && cur.text === b.text && cur.sub === b.sub ? cur : b))
   const [debug, setDebug] = useState(null)
   const settingsRef = useRef(settings)
   settingsRef.current = settings
@@ -123,36 +128,37 @@ function Scan({ settings, direction, setPending, onDone }) {
           const r = recognizer.push(face, gestures)
           setDebug(s.debug ? r : null)
           if (r.status === 'none') {
-            setBanner((b) => (b.kind === 'ok' ? b : { kind: 'idle', text: t('kiosk.approach') }))
+            setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))
             return requestAnimationFrame(loop)
           }
           if (r.status === 'collecting' || r.status === 'confirming') {
-            setBanner({ kind: 'idle', text: t('kiosk.recognizing') })
+            show({ kind: 'idle', text: t('kiosk.recognizing') })
             return requestAnimationFrame(loop)
           }
           if (r.status === 'spoof') {
             if (performance.now() - lastReject > 2000) bumpStat('spoofRejected')
             lastReject = performance.now()
-            setBanner({ kind: 'bad', text: t('kiosk.spoof') })
+            show({ kind: 'bad', text: t('kiosk.spoof') })
             return requestAnimationFrame(loop)
           }
           if (r.status === 'unknown') {
             if (performance.now() - lastReject > 2000) bumpStat('unknown')
             lastReject = performance.now()
-            setBanner({ kind: 'bad', text: t('kiosk.unknown') })
+            show({ kind: 'bad', text: t('kiosk.unknown') })
             return requestAnimationFrame(loop)
           }
 
           // r.status === 'match': média dos fotogramas coincide com um trabalhador, de forma estável
           const { worker, similarity } = r
-          const alive = !s.liveness || r.blink || r.turn
+          const confident = s.fastLiveness && r.real >= FAST_REAL && r.live >= FAST_REAL // modo rápido: o modelo já tem a certeza
+          const alive = !s.liveness || r.blink || r.turn || confident
           if (!alive) {
-            setBanner({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
+            show({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
             return requestAnimationFrame(loop)
           }
           const last = lastPunch.get(worker.id) || 0
           if (Date.now() - last < s.cooldownSec * 1000) {
-            setBanner({ kind: 'warn', text: t('kiosk.already', { name: worker.name }) })
+            show({ kind: 'warn', text: t('kiosk.already', { name: worker.name }) })
             pauseUntil = performance.now() + 2500
             recognizer.reset()
             return requestAnimationFrame(loop)
@@ -168,7 +174,7 @@ function Scan({ settings, direction, setPending, onDone }) {
           })
           lastPunch.set(worker.id, Date.now())
           bumpStat('punches', ms)
-          setBanner({
+          show({
             kind: 'ok',
             text: t('kiosk.hello', { name: worker.name }),
             sub: `${isIn ? t('dir.in') : t('dir.out')} ${fmtTime(punch.punchedAt, locale)}`,

@@ -1,7 +1,7 @@
 # Relógio de ponto facial — mockup PWA
 
 React 19 + Vite, `@vladmandic/human` (modelos servidos de `public/models`, em cache pelo service worker),
-IndexedDB (vetores cifrados com AES-GCM + fila offline), relay Cloudflare (Worker + D1) e Supabase (tabela `punches` + Edge Function `pull-punches`, que vai buscar as picagens ao relay).
+IndexedDB (vetores cifrados com AES-GCM + fila offline), relay Cloudflare (Worker + D1) e Supabase (tabela `timetrack` + Edge Function `pull-punches`, que vai buscar as picagens ao relay).
 
 ## Correr
 ```bash
@@ -22,7 +22,7 @@ npm run build && npm run preview   # PWA com service worker (teste offline)
 Tablet ──POST /punch (token do dispositivo)──► Relay Cloudflare (Worker + D1) ◄── GET /pull + POST /ack (HMAC) ── Supabase (pg_cron + Edge Function)
 ```
 O tablet **não lê nem escreve no Supabase**: não tem credenciais, chave nem endereço dele (nem o cliente do Supabase está na app). Só escreve no relay (acrescentar, idempotente por `eventId`).
-O Supabase vai buscar as picagens ao relay a cada 15 minutos com pedidos assinados (HMAC-SHA256 + data), valida-as de novo, grava em `punches` e só depois confirma (o relay apaga).
+O Supabase vai buscar as picagens ao relay a cada 15 minutos com pedidos assinados (HMAC-SHA256 + data), valida-as de novo, grava em `timetrack` e só depois confirma (o relay apaga).
 
 ### 1. Relay (Cloudflare)
 ```bash
@@ -36,7 +36,7 @@ node scripts/add-device.mjs dev-entrada         # gera o token do tablet e o SQL
 Em `wrangler.jsonc`, trocar `ALLOWED_ORIGIN` pelo endereço da PWA. Teste local: `npx wrangler dev --local` e `node relay/scripts/smoke-test.mjs` (ver cabeçalho do ficheiro).
 
 ### 2. Supabase
-1. Aplicar `supabase/migrations/001_punches.sql`.
+1. Aplicar `supabase/migrations/001_punches.sql` e `004_rename_punches_to_timetrack.sql` (a tabela chamava-se `punches` e passou a `timetrack`).
 2. `supabase secrets set RELAY_URL=https://<worker>.workers.dev PULL_SECRET=<o mesmo do relay> CRON_SECRET=<aleatório>`
 3. `supabase functions deploy pull-punches --no-verify-jwt`
 4. Criar no Vault `punch_pull_url` e `punch_cron_secret` e aplicar `supabase/migrations/002_pull_schedule.sql` (instruções no topo do ficheiro).
@@ -45,7 +45,19 @@ Em `wrangler.jsonc`, trocar `ALLOWED_ORIGIN` pelo endereço da PWA. Teste local:
 Em Definições: URL do relay e token do dispositivo. Nada mais é preciso: o tablet nunca fala com o Supabase.
 
 ### 4. Chefe de equipa
-Lê as picagens na app de timesheets/intranet, que consulta a tabela `punches` do Supabase (a policy `punches_select_authenticated` da migração 001 dá acesso de leitura a utilizadores autenticados; convém restringi-la por obra/equipa).
+Lê as picagens na app de timesheets/intranet, que consulta a tabela `timetrack` do Supabase (a policy `timetrack_select_authenticated`, criada na migração 001 com o nome antigo, dá acesso de leitura a utilizadores autenticados; convém restringi-la por obra/equipa).
+
+## Arranque rápido
+Os modelos de reconhecimento (≈13 MB, em cache no service worker e na IndexedDB) carregam em segundo plano logo que a app abre, em qualquer ecrã, e a consola regista o tempo ("Modelos de reconhecimento prontos em … ms"). No ecrã de escolha aparece "A preparar o reconhecimento…" até estarem prontos.
+
+**Câmara sempre ligada:** a câmara abre-se no arranque e fica aberta (partilhada entre os ecrãs), por isso escolher Entrada/Saída já a encontra pronta. Só passa a ser analisada depois dessa escolha e, enquanto não se escolhe, não se mostra nem se processa nenhuma imagem (a luz da câmara fica acesa). Isto substitui a regra anterior "a câmara só liga depois de escolher" e deve constar da avaliação de impacto (DPIA).
+
+## Velocidade do reconhecimento
+- **Decisão antecipada:** com 3 fotogramas já decide se a correspondência for muito forte (limiar +0,15 e margem de 0,10 sobre o segundo); se não, espera pela janela completa de 5.
+- **Piscar relativo:** além do limiar do Human, deteta quedas de 35% na abertura dos olhos (apanha pestanejos parciais que a taxa de fotogramas não apanha). Era a principal causa de ter de piscar várias vezes.
+- **Sem o modelo da íris** (não é usado: piscar e rotação saem da malha facial): menos dois modelos por fotograma.
+- **Menos renderizações** no ecrã de picar: o aviso só se atualiza quando muda.
+- **Modo rápido de vida** (Definições, desligado por omissão): dispensa o piscar quando a média do anti-foto do modelo é ≥ 0,8. Menos seguro; testar com o modo diagnóstico.
 
 ## Perfis
 - **Registar, Picagens e Definições** só aparecem a um **Administrador**. Desbloqueia-se em Picar → "🔒 Administração" (reconhecimento facial + deteção de vida); a sessão termina com "Terminar sessão" ou após 5 min sem atividade.

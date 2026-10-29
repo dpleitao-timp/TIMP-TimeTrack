@@ -1,5 +1,5 @@
 // Edge Function: pull-punches
-// É o Supabase que vai buscar as picagens ao relay (Cloudflare) e as grava em `punches`.
+// É o Supabase que vai buscar as picagens ao relay (Cloudflare) e as grava em `timetrack`.
 // Chamada pelo pg_cron (ver migração 002). Os tablets nunca contactam o Supabase.
 //
 // Segredos (supabase secrets set ...):
@@ -97,8 +97,8 @@ Deno.serve(async (req) => {
           .upsert(deviceIds.map((id) => ({ id, name: id })), { onConflict: 'id', ignoreDuplicates: true })
         if (devErr) throw new Error(`devices: ${devErr.message}`)
         // reenvios/duplicados do mesmo event_id são ignorados
-        const { error } = await supabase.from('punches').upsert(rows, { onConflict: 'event_id', ignoreDuplicates: true })
-        if (error) throw new Error(`punches: ${error.message}`)
+        const { error } = await supabase.from('timetrack').upsert(rows, { onConflict: 'event_id', ignoreDuplicates: true })
+        if (error) throw new Error(`timetrack: ${error.message}`)
         stored += rows.length
       }
 

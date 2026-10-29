@@ -16,7 +16,7 @@ const STEPS = [
 export default function Enrol({ settings, onRegistered }) {
   const { t } = useT()
   const videoRef = useRef(null)
-  const { ready, error } = useCamera(videoRef)
+  const { ready, error } = useCamera(videoRef, { deviceId: settings.cameraId })
   const [name, setName] = useState('')
   const [sageId, setSageId] = useState('')
   const [makeAdmin, setMakeAdmin] = useState(false)

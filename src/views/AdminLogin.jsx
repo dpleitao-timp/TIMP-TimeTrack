@@ -11,7 +11,7 @@ const TIMEOUT_MS = 45000
 export default function AdminLogin({ settings, onUnlock, onCancel }) {
   const { t } = useT()
   const videoRef = useRef(null)
-  const { ready, error } = useCamera(videoRef)
+  const { ready, error } = useCamera(videoRef, { deviceId: settings.cameraId })
   const [loading, setLoading] = useState(t('kiosk.loadingModels'))
   const [banner, setBanner] = useState({ kind: 'idle', text: t('kiosk.approach') })
   const settingsRef = useRef(settings)

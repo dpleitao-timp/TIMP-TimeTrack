@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { flushQueue } from '../lib/sync.js'
 import { getTheme, setTheme } from '../lib/theme.js'
 import { useT } from '../lib/i18n.jsx'
+import { listCameras } from '../lib/cameras.js'
 
 export default function Settings({ settings, onChange }) {
   const { t } = useT()
   const [s, setS] = useState(settings)
   const [msg, setMsg] = useState('')
   const [theme, setThemeState] = useState(getTheme())
+  const [cameras, setCameras] = useState([])
+  const [camMsg, setCamMsg] = useState('')
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
@@ -84,6 +87,15 @@ export default function Settings({ settings, onChange }) {
             {t('settings.cooldown')}
             <input className="field-input" type="number" min="0" value={s.cooldownSec} onChange={set('cooldownSec')} />
           </label>
+          <button type="button" className="switch-row" onClick={() => setS({ ...s, fastLiveness: !s.fastLiveness })}>
+            <span>
+              {t('settings.fastLiveness')}
+              <small>{t('settings.fastLivenessHint')}</small>
+            </span>
+            <span className={`switch ${s.fastLiveness ? 'on' : ''}`}>
+              <i />
+            </span>
+          </button>
           <button type="button" className="switch-row" onClick={() => setS({ ...s, debug: !s.debug })}>
             <span>
               {t('settings.debug')}
@@ -102,6 +114,37 @@ export default function Settings({ settings, onChange }) {
               <i />
             </span>
           </button>
+        </div>
+
+        <div className="card">
+          <h2>{t('settings.cameras')}</h2>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={async () => {
+              setCamMsg('')
+              try {
+                const list = await listCameras()
+                setCameras(list)
+                setCamMsg(t('settings.camerasFound', { n: list.length }))
+              } catch (e) {
+                setCamMsg(String(e?.message || e))
+              }
+            }}
+          >
+            {t('settings.detectCameras')}
+          </button>
+          {camMsg && <p className="muted">{camMsg}</p>}
+          <label className="field" style={{ marginTop: 12 }}>
+            {t('settings.camera')}
+            <select className="field-select" value={s.cameraId} onChange={set('cameraId')}>
+              <option value="">{t('settings.cameraAuto')}</option>
+              {cameras.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+              {s.cameraId && !cameras.some((c) => c.id === s.cameraId) && <option value={s.cameraId}>{t('settings.cameraSaved')}</option>}
+            </select>
+          </label>
         </div>
 
         <div className="card">

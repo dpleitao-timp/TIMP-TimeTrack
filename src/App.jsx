@@ -7,6 +7,8 @@ import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync } from './lib/sync.js'
 import { listWorkers, hasUsableAdmin, pendingPunches } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
+import { initHuman } from './lib/face.js'
+import { warmCamera, releaseCamera } from './lib/useCamera.js'
 
 // Só o Administrador acede a estes separadores.
 const ADMIN_TABS = ['enrol', 'punches', 'settings']
@@ -22,6 +24,16 @@ export default function App() {
   const [hasAdmin, setHasAdmin] = useState(null) // null = a verificar
   const [admin, setAdmin] = useState(null) // sessão: { id, name }
   const [pending, setPending] = useState(0) // picagens por enviar
+
+  // Modelos de reconhecimento e câmara abertos em segundo plano assim que a app abre (em qualquer ecrã),
+  // para estarem prontos quando alguém carregar em Entrada/Saída. O pequeno atraso deixa a interface desenhar primeiro.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      initHuman().catch(() => {})
+      warmCamera(loadSettings().cameraId) // câmara sempre ligada: já aberta quando se escolhe Entrada/Saída
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [])
 
   const refreshAdmin = useCallback(async () => {
     const workers = await listWorkers()
@@ -91,6 +103,10 @@ export default function App() {
   }, [blocked])
 
   const update = (s) => {
+    if (s.cameraId !== settings.cameraId) {
+      releaseCamera() // mudou a câmara escolhida: fecha a antiga e abre a nova
+      warmCamera(s.cameraId)
+    }
     saveSettings(s)
     setSettings(s)
   }

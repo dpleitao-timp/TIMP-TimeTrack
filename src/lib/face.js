@@ -3,6 +3,7 @@ import Human from '@vladmandic/human'
 // Modelos servidos localmente (public/models) e guardados em cache pelo service worker.
 const config = {
   modelBasePath: '/models/',
+  cacheModels: true, // guarda os modelos já convertidos na IndexedDB: arranques seguintes mais rápidos
   backend: 'webgl',
   debug: false,
   cacheSensitivity: 0,
@@ -11,7 +12,7 @@ const config = {
     enabled: true,
     detector: { modelPath: 'blazeface.json', rotation: false, maxDetected: 1, minConfidence: 0.5 },
     mesh: { enabled: true, modelPath: 'facemesh.json' },
-    iris: { enabled: true, modelPath: 'iris.json' },
+    iris: { enabled: false }, // não é preciso: piscar e rotação vêm da malha facial; poupa dois modelos por fotograma
     description: { enabled: true, modelPath: 'faceres.json' },
     antispoof: { enabled: true, modelPath: 'antispoof.json' },
     liveness: { enabled: true, modelPath: 'liveness.json' },
@@ -30,10 +31,12 @@ let loadPromise
 // A promessa é partilhada: várias chamadas esperam pelo mesmo carregamento.
 export function initHuman(onStatus) {
   loadPromise ??= (async () => {
+    const t0 = performance.now()
     const h = new Human(config)
     await h.load()
     await h.warmup()
     human = h
+    console.info(`Modelos de reconhecimento prontos em ${Math.round(performance.now() - t0)} ms`)
     return h
   })().catch((e) => {
     loadPromise = undefined

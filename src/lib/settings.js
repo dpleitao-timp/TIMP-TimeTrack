@@ -14,7 +14,9 @@ const DEFAULTS = {
   stableFrames: 2, // avaliações seguidas com a mesma identidade
   avgFrames: 5, // fotogramas cuja média decide o reconhecimento
   antispoofMin: 0.35, // média mínima do anti-foto/vida do modelo (0 desliga)
+  fastLiveness: false, // modo rápido: dispensa o piscar quando o modelo anti-foto tem confiança alta
   debug: false, // mostra os valores do reconhecimento no ecrã de picar
+  cameraId: '', // câmara normal ('' = frontal)
 }
 
 export function loadSettings() {

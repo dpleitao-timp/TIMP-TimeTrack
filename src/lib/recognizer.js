@@ -13,6 +13,7 @@ const MIN_FRAMES = 3 // a decisão pode ser tomada com 3 fotogramas se a corresp
 const STRONG_SIM = 0.15 // folga acima do limiar para decidir cedo
 const STRONG_MARGIN = 0.1 // folga sobre o segundo melhor para decidir cedo
 const BLINK_DROP = 0.65 // piscar: abertura do olho cai abaixo de 65% do máximo recente
+const HEAD_MOVE = 0.22 // amplitude (rad, ~12°) de rotação da cabeça que conta como movimento
 const MIN_OPEN = 0.15 // abaixo disto o olho já estava quase fechado: não serve de referência
 
 // Abertura média dos dois olhos, a partir da malha facial (mesmos pontos que o Human usa para o piscar).
@@ -31,6 +32,8 @@ export function createRecognizer(getSettings, workers) {
   let track = null // { id, count }
   let signals = { blink: false, turn: false }
   let eyes = [] // histórico recente da abertura dos olhos
+  let yaws = [] // histórico recente da rotação da cabeça
+  let pitches = []
   let start = 0
 
   const reset = () => {
@@ -38,6 +41,8 @@ export function createRecognizer(getSettings, workers) {
     track = null
     signals = { blink: false, turn: false }
     eyes = []
+    yaws = []
+    pitches = []
     start = 0
   }
 
@@ -64,7 +69,21 @@ export function createRecognizer(getSettings, workers) {
       const top = Math.max(...eyes)
       relBlink = eyes.length >= 3 && top > MIN_OPEN && open < top * BLINK_DROP
     }
-    signals = { blink: signals.blink || sig.blink || relBlink, turn: signals.turn || sig.turn }
+    // movimento da cabeça: com óculos de proteção o piscar pode não ser visível (reflexos, lentes escuras);
+    // virar ou acenar ligeiramente a cabeça também prova que há alguém vivo
+    const ang = face.rotation?.angle
+    let moved = false
+    if (ang && Number.isFinite(ang.yaw) && Number.isFinite(ang.pitch)) {
+      yaws.push(ang.yaw)
+      pitches.push(ang.pitch)
+      if (yaws.length > 16) {
+        yaws.shift()
+        pitches.shift()
+      }
+      const range = (a) => Math.max(...a) - Math.min(...a)
+      moved = yaws.length >= 4 && (range(yaws) >= HEAD_MOVE || range(pitches) >= HEAD_MOVE)
+    }
+    signals = { blink: signals.blink || sig.blink || relBlink, turn: signals.turn || sig.turn || moved }
 
     if (buffer.length < minFrames) return { status: 'collecting', frames: buffer.length, of: n }
     const early = buffer.length < n // janela ainda incompleta: só decide se a correspondência for muito forte

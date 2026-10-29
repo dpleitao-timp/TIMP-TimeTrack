@@ -2,6 +2,7 @@
 const KEY = 'timp-ponto-settings'
 
 const DEFAULTS = {
+  detectorConfidence: 0.4, // confiança mínima da deteção do rosto (mais baixa = deteta melhor com capacete/óculos)
   engine: 'faceres', // motor de reconhecimento: 'faceres' (por omissão) | 'mobilefacenet' (experimental, mais leve)
   backend: 'webgl', // aceleração gráfica: 'webgl' | 'webgpu' (experimental; cai para webgl se o aparelho não suportar)
   obra: '', // obra onde está o tablet; vai em todas as picagens

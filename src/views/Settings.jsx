@@ -14,8 +14,8 @@ export default function Settings({ settings, onChange }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
-    const reload = s.engine !== settings.engine || s.backend !== settings.backend
-    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin) }
+    const reload = s.engine !== settings.engine || s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
+    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence) }
     onChange(next)
     setMsg(t('settings.saved'))
     const r = await flushQueue(next)
@@ -88,6 +88,11 @@ export default function Settings({ settings, onChange }) {
               <option value="webgpu">WebGPU ({t('settings.experimental')})</option>
             </select>
             <small>{t('settings.backendHint')}</small>
+          </label>
+          <label className="field">
+            {t('settings.detectorConfidence', { v: Number(s.detectorConfidence).toFixed(2) })}
+            <input type="range" min="0.2" max="0.8" step="0.05" value={s.detectorConfidence} onChange={set('detectorConfidence')} />
+            <small>{t('settings.detectorConfidenceHint')}</small>
           </label>
           <label className="field">
             {t('settings.avgFrames')}

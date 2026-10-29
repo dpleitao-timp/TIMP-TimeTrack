@@ -52,6 +52,9 @@ Os modelos de reconhecimento (≈13 MB, em cache no service worker e na IndexedD
 
 **Câmara sempre ligada:** a câmara abre-se no arranque e fica aberta (partilhada entre os ecrãs), por isso escolher Entrada/Saída já a encontra pronta. Só passa a ser analisada depois dessa escolha e, enquanto não se escolhe, não se mostra nem se processa nenhuma imagem (a luz da câmara fica acesa). Isto substitui a regra anterior "a câmara só liga depois de escolher" e deve constar da avaliação de impacto (DPIA).
 
+## Intervalo mínimo entre picagens
+O intervalo (Definições, em segundos) é calculado a partir das picagens guardadas no tablet, por isso sobrevive a recargas, atualizações e reinícios. Aplica-se ao mesmo trabalhador, em qualquer direção, **neste tablet**: dois tablets (entrada e saída) não partilham a lista, por isso um intervalo entre os dois terá de ser verificado no Supabase/intranet. Apagar uma picagem por enviar deixa o trabalhador picar logo outra vez.
+
 ## Velocidade do reconhecimento
 - **Decisão antecipada:** com 3 fotogramas já decide se a correspondência for muito forte (limiar +0,15 e margem de 0,10 sobre o segundo); se não, espera pela janela completa de 5.
 - **Piscar relativo:** além do limiar do Human, deteta quedas de 35% na abertura dos olhos (apanha pestanejos parciais que a taxa de fotogramas não apanha). Era a principal causa de ter de piscar várias vezes.
@@ -64,6 +67,12 @@ Em Definições → Reconhecimento:
 - **Motor:** `FaceRes` (por omissão) ou `MobileFaceNet` (mais leve, 5 MB; o Human considera-o o motor antigo, por isso a precisão tem de ser **medida no tablet**). Cada registo guarda o motor com que foi feito; mudar de motor obriga a **atualizar a biometria** de cada trabalhador ("atualizar biometria"). Um Administrador registado com o motor antigo deixa de contar; se for o único, a administração abre para o poder atualizar. O MobileFaceNet compara por cosseno (vetores normalizados), mapeado para a mesma escala 0..1 do limiar.
 - **Aceleração:** `WebGL` (por omissão) ou `WebGPU`; se o aparelho não suportar WebGPU, o Human usa WebGL. A app recarrega ao guardar.
 - Para comparar, ligue o **modo diagnóstico**: o ecrã de picar mostra o motor/backend e o tempo da deteção por fotograma (`ms`).
+
+## Capacete e óculos de proteção
+- **Registo com EPI:** em Registar, "adicionar com EPI" junta ao trabalhador 3 capturas feitas **com o capacete e os óculos postos** (de frente e virando para cada lado), sem apagar as anteriores. O reconhecimento usa o melhor de todos os vetores, por isso reconhece com e sem equipamento.
+- **Deteção mais tolerante:** a confiança mínima da deteção do rosto baixou para 0,40 (ajustável em Definições; recarrega ao guardar).
+- **Vida sem piscar:** os óculos de proteção podem esconder o piscar (reflexos, lentes escuras). Passou a contar também um **movimento da cabeça** (virar ou acenar ≥ ~12°) como prova de vida.
+- Se o anti-fotografia do modelo rejeitar rostos reais com equipamento, o modo diagnóstico mostra `real`/`live`; baixe o limiar anti-foto ou use o modo rápido de vida só depois de testar.
 
 ## Perfis
 - **Registar, Picagens e Definições** só aparecem a um **Administrador**. Desbloqueia-se em Picar → "🔒 Administração" (reconhecimento facial + deteção de vida); a sessão termina com "Terminar sessão" ou após 5 min sem atividade.

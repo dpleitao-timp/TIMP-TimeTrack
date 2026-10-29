@@ -38,6 +38,7 @@ function buildConfig() {
   const s = loadSettings()
   const cfg = structuredClone(baseConfig)
   cfg.backend = s.backend === 'webgpu' ? 'webgpu' : 'webgl'
+  cfg.face.detector.minConfidence = Number(s.detectorConfidence) || 0.4
   if (currentEngine() === 'mobilefacenet') {
     // o MobileFaceNet substitui o descritor do faceres (o Human aproveita o seu resultado como embedding)
     cfg.face.description = { enabled: false }

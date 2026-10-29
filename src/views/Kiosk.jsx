@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, backendName, currentEngine } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
-import { listWorkers, enqueuePunch, pendingPunches } from '../lib/db.js'
+import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
-import { lastPunch } from '../lib/cooldown.js'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const FAST_REAL = 0.8 // confiança mínima do anti-foto para dispensar o piscar no modo rápido
@@ -158,9 +157,9 @@ function Scan({ settings, direction, setPending, onDone }) {
             show({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
             return requestAnimationFrame(loop)
           }
-          const last = lastPunch.get(worker.id) || 0
-          if (Date.now() - last < s.cooldownSec * 1000) {
-            show({ kind: 'warn', text: t('kiosk.already', { name: worker.name }) })
+          const waitMs = Number(s.cooldownSec) * 1000 - (await msSinceLastPunch(worker.id))
+          if (waitMs > 0) {
+            show({ kind: 'warn', text: t('kiosk.alreadyWait', { name: worker.name, min: Math.ceil(waitMs / 60000) }) })
             pauseUntil = performance.now() + 2500
             recognizer.reset()
             return requestAnimationFrame(loop)
@@ -174,7 +173,6 @@ function Scan({ settings, direction, setPending, onDone }) {
             workerName: worker.name,
             confidence: similarity,
           })
-          lastPunch.set(worker.id, Date.now())
           bumpStat('punches', ms)
           show({
             kind: 'ok',

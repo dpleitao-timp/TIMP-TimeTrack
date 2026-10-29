@@ -171,6 +171,17 @@ export async function deletePendingPunch(eventId) {
   return row
 }
 
+// Milissegundos desde a última picagem deste trabalhador neste tablet (Infinity se não houver).
+// Lê a fila guardada na IndexedDB, por isso sobrevive a recargas, atualizações e reinícios (o intervalo mínimo
+// entre picagens não pode depender de memória). Picagens recusadas pelo relay não contam; as apagadas também não.
+export async function msSinceLastPunch(sageId) {
+  const queue = await listQueue() // já vem da mais recente para a mais antiga
+  const last = queue.find((p) => (p.sageId ?? p.workerId) === sageId && !p.rejected)
+  if (!last) return Infinity
+  const now = Date.now() + (await getClockOffset()) // mesma hora usada ao gravar a picagem
+  return Math.max(0, now - new Date(last.punchedAt).getTime())
+}
+
 export async function listQueue() {
   const d = await db()
   const all = await d.getAll('queue')

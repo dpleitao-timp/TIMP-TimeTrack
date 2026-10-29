@@ -4,7 +4,6 @@ import { loadStats, resetStats } from '../lib/settings.js'
 import { useT } from '../lib/i18n.jsx'
 import { fmtDateTime, localIso } from '../lib/date.js'
 import DateField from './DateField.jsx'
-import { lastPunch } from '../lib/cooldown.js'
 
 const today = () => localIso()
 
@@ -35,7 +34,7 @@ export default function Punches() {
     setMsg('')
     try {
       await deletePendingPunch(p.eventId)
-      lastPunch.delete(p.sageId) // o trabalhador pode voltar a picar já, sem esperar o intervalo mínimo
+      // o trabalhador pode voltar a picar já: sem a picagem na fila, deixa de haver intervalo a respeitar
     } catch (e) {
       setMsg(e.code === 'ALREADY_SENT' ? t('punches.alreadySent') : String(e.message || e))
     }

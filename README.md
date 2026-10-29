@@ -59,6 +59,12 @@ Os modelos de reconhecimento (≈13 MB, em cache no service worker e na IndexedD
 - **Menos renderizações** no ecrã de picar: o aviso só se atualiza quando muda.
 - **Modo rápido de vida** (Definições, desligado por omissão): dispensa o piscar quando a média do anti-foto do modelo é ≥ 0,8. Menos seguro; testar com o modo diagnóstico.
 
+## Motor de reconhecimento e aceleração gráfica (experimentais)
+Em Definições → Reconhecimento:
+- **Motor:** `FaceRes` (por omissão) ou `MobileFaceNet` (mais leve, 5 MB; o Human considera-o o motor antigo, por isso a precisão tem de ser **medida no tablet**). Cada registo guarda o motor com que foi feito; mudar de motor obriga a **atualizar a biometria** de cada trabalhador ("atualizar biometria"). Um Administrador registado com o motor antigo deixa de contar; se for o único, a administração abre para o poder atualizar. O MobileFaceNet compara por cosseno (vetores normalizados), mapeado para a mesma escala 0..1 do limiar.
+- **Aceleração:** `WebGL` (por omissão) ou `WebGPU`; se o aparelho não suportar WebGPU, o Human usa WebGL. A app recarrega ao guardar.
+- Para comparar, ligue o **modo diagnóstico**: o ecrã de picar mostra o motor/backend e o tempo da deteção por fotograma (`ms`).
+
 ## Perfis
 - **Registar, Picagens e Definições** só aparecem a um **Administrador**. Desbloqueia-se em Picar → "🔒 Administração" (reconhecimento facial + deteção de vida); a sessão termina com "Terminar sessão" ou após 5 min sem atividade.
 - O **primeiro trabalhador registado é sempre Administrador** (fica com a sessão aberta nesse momento). Enquanto não houver Administrador utilizável, a administração está aberta para o registar.

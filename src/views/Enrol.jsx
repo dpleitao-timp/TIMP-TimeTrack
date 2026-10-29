@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { initHuman, detect, bestMatch, meanEmbedding } from '../lib/face.js'
-import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin } from '../lib/db.js'
+import { initHuman, detect, bestMatch, meanEmbedding, prepEmbedding, currentEngine } from '../lib/face.js'
+import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin, isUsable } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 import { useT } from '../lib/i18n.jsx'
 
@@ -30,7 +30,7 @@ export default function Enrol({ settings, onRegistered }) {
   const runRef = useRef({ active: false })
 
   const refresh = async () => setWorkers(await listWorkers())
-  const usableAdmins = workers.filter((w) => w.role === 'admin' && !w.broken).length
+  const usableAdmins = workers.filter((w) => w.role === 'admin' && isUsable(w)).length
   const firstRegistration = usableAdmins === 0
 
   useEffect(() => {
@@ -79,10 +79,10 @@ export default function Enrol({ settings, onRegistered }) {
       setLive(
         !face ? t('enrol.noFace') : !r ? t('enrol.noPose') : `yaw ${r.yaw.toFixed(2)} · pitch ${r.pitch.toFixed(2)} · score ${face.score.toFixed(2)} · ${frames.length}/${FRAMES}`,
       )
-      if (face && r && face.score > 0.7 && STEPS[i].ok(r, st)) frames.push(Array.from(face.embedding))
+      if (face && r && face.score > 0.7 && STEPS[i].ok(r, st)) frames.push(prepEmbedding(Array.from(face.embedding)))
       else frames = []
       if (frames.length >= FRAMES) {
-        const avg = meanEmbedding(frames)
+        const avg = prepEmbedding(meanEmbedding(frames))
         const { worker, similarity } = bestMatch(avg, existing.filter((w) => w.id !== id))
         if (worker && similarity > settings.threshold) {
           setMsg(t('enrol.faceExists', { name: worker.name }))
@@ -99,13 +99,13 @@ export default function Enrol({ settings, onRegistered }) {
     if (run.active && embeddings.length === STEPS.length) {
       if (replacing) {
         // atualizar a biometria: troca os vetores e mantém SAGE ID, perfil e data de criação
-        await saveWorker({ id, name: name.trim(), role: replacing.role, embeddings, createdAt: replacing.createdAt })
+        await saveWorker({ id, name: name.trim(), role: replacing.role, embeddings, createdAt: replacing.createdAt, engine: currentEngine() })
         setMsg(t('enrol.doneUpdated', { name: name.trim(), n: embeddings.length }))
         onRegistered?.(null)
       } else {
         // o primeiro registo é sempre Administrador; depois, um Administrador pode registar outros
         const role = !hasUsableAdmin(existing) || makeAdmin ? 'admin' : 'user'
-        await saveWorker({ id, name: name.trim(), role, embeddings })
+        await saveWorker({ id, name: name.trim(), role, embeddings, engine: currentEngine() })
         setMsg(t(role === 'admin' ? 'enrol.doneAdmin' : 'enrol.done', { name: name.trim(), n: embeddings.length }))
         onRegistered?.({ id, name: name.trim(), role })
       }
@@ -185,7 +185,7 @@ export default function Enrol({ settings, onRegistered }) {
               <li key={w.id}>
                 <span>
                   {w.name} {w.role === 'admin' && <span className="pill pill-ok">{t('enrol.adminBadge')}</span>}
-                  <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : t('enrol.vectors', { n: w.embeddings.length })}</small>
+                  <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : w.stale ? t('enrol.otherEngine', { engine: w.engine }) : t('enrol.vectors', { n: w.embeddings.length })}</small>
                 </span>
                 <span className="btn-row">
                   <button
@@ -202,9 +202,9 @@ export default function Enrol({ settings, onRegistered }) {
                   >
                     {t('enrol.updateBiometrics')}
                   </button>
-                  {w.role === 'admin' && !w.broken && usableAdmins === 1 && workers.length > 1 ? (
+                  {w.role === 'admin' && isUsable(w) && usableAdmins === 1 && workers.length > 1 ? (
                     <span className="muted">{t('enrol.onlyAdmin')}</span>
-                  ) : w.role === 'admin' && !w.broken && usableAdmins === 1 ? (
+                  ) : w.role === 'admin' && isUsable(w) && usableAdmins === 1 ? (
                     // único trabalhador e único Administrador: pode apagar-se, com confirmação reforçada (escrever o SAGE ID)
                     <button
                       className="link-button"

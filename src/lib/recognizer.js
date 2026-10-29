@@ -1,4 +1,4 @@
-import { rankMatches, meanEmbedding, livenessSignals } from './face.js'
+import { rankMatches, meanEmbedding, prepEmbedding, livenessSignals } from './face.js'
 
 // Reconhecimento por janela deslizante de N fotogramas:
 //  - a decisão usa a MÉDIA dos vetores dos últimos N fotogramas (menos ruído do que um só);
@@ -48,7 +48,7 @@ export function createRecognizer(getSettings, workers) {
       return { status: 'none' }
     }
     if (!buffer.length) start = performance.now()
-    buffer.push({ e: Array.from(face.embedding), real: face.real, live: face.live })
+    buffer.push({ e: prepEmbedding(Array.from(face.embedding)), real: face.real, live: face.live })
     const n = Math.max(1, Number(s.avgFrames) || 5)
     const minFrames = Math.min(n, MIN_FRAMES)
     while (buffer.length > n) buffer.shift()
@@ -78,7 +78,7 @@ export function createRecognizer(getSettings, workers) {
       return { status: 'spoof', ...info }
     }
 
-    const ranked = rankMatches(meanEmbedding(buffer.map((b) => b.e)), workers)
+    const ranked = rankMatches(prepEmbedding(meanEmbedding(buffer.map((b) => b.e))), workers)
     const best = ranked[0]
     const second = ranked[1]
     info.similarity = best?.similarity ?? 0

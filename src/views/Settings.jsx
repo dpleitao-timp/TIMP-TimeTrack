@@ -14,11 +14,13 @@ export default function Settings({ settings, onChange }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
+    const reload = s.engine !== settings.engine || s.backend !== settings.backend
     const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin) }
     onChange(next)
     setMsg(t('settings.saved'))
     const r = await flushQueue(next)
     if (r.sent) setMsg(t('settings.savedSent', { n: r.sent }))
+    if (reload) setTimeout(() => location.reload(), 600) // o motor e o backend só mudam ao recarregar
   }
 
   return (
@@ -70,6 +72,22 @@ export default function Settings({ settings, onChange }) {
           <label className="field">
             {t('settings.threshold', { v: Number(s.threshold).toFixed(2) })}
             <input type="range" min="0.3" max="0.9" step="0.01" value={s.threshold} onChange={set('threshold')} />
+          </label>
+          <label className="field">
+            {t('settings.engine')}
+            <select className="field-select" value={s.engine} onChange={set('engine')}>
+              <option value="faceres">{t('settings.engineFaceres')}</option>
+              <option value="mobilefacenet">{t('settings.engineMobile')}</option>
+            </select>
+            <small>{t('settings.engineHint')}</small>
+          </label>
+          <label className="field">
+            {t('settings.backend')}
+            <select className="field-select" value={s.backend} onChange={set('backend')}>
+              <option value="webgl">WebGL</option>
+              <option value="webgpu">WebGPU ({t('settings.experimental')})</option>
+            </select>
+            <small>{t('settings.backendHint')}</small>
           </label>
           <label className="field">
             {t('settings.avgFrames')}

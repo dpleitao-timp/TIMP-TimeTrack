@@ -1,4 +1,5 @@
 import { openDB } from 'idb'
+import { loadSettings } from './settings.js'
 
 // IndexedDB local: trabalhadores (embeddings encriptados), fila de picagens e meta.
 let dbPromise
@@ -47,10 +48,10 @@ async function decrypt({ iv, data }) {
 
 // --- Trabalhadores ---
 // role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador.
-export async function saveWorker({ id, name, embeddings, role = 'user', createdAt }) {
+export async function saveWorker({ id, name, embeddings, role = 'user', createdAt, engine }) {
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
-  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now() })
+  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? loadSettings().engine })
 }
 
 export async function listWorkers() {
@@ -62,7 +63,9 @@ export async function listWorkers() {
   // e marcados como `broken`, para poderem ser apagados e registados de novo.
   return Promise.all(
     rows.map(async (w) => {
-      const base = { id: w.id, name: w.name, createdAt: w.createdAt, role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user' }
+      const engine = w.engine ?? 'faceres' // registos anteriores ao motor alternativo
+      // `stale`: biometria feita com outro motor; não serve para reconhecer até ser atualizada
+      const base = { id: w.id, name: w.name, createdAt: w.createdAt, engine, stale: engine !== loadSettings().engine, role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user' }
       try {
         return { ...base, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
       } catch {
@@ -72,8 +75,9 @@ export async function listWorkers() {
   )
 }
 
-// Só existe administração protegida se houver um Administrador utilizável (com vetores legíveis).
-export const hasUsableAdmin = (workers) => workers.some((w) => w.role === 'admin' && !w.broken)
+// Só existe administração protegida se houver um Administrador utilizável (vetores legíveis e do motor atual).
+export const isUsable = (w) => !w.broken && !w.stale
+export const hasUsableAdmin = (workers) => workers.some((w) => w.role === 'admin' && isUsable(w))
 
 // Tem de ficar sempre pelo menos um Administrador ativo (utilizável): nem se apaga nem se despromove o último.
 // Exceção ao apagar: se o Administrador for a única pessoa registada, pode apagar-se e o tablet volta
@@ -82,7 +86,7 @@ async function assertNotLastAdmin(id, { allowIfOnlyWorker = false } = {}) {
   const workers = await listWorkers()
   const target = workers.find((w) => w.id === id)
   if (allowIfOnlyWorker && workers.length === 1) return
-  if (target?.role === 'admin' && !target.broken && workers.filter((w) => w.role === 'admin' && !w.broken).length === 1) {
+  if (target?.role === 'admin' && isUsable(target) && workers.filter((w) => w.role === 'admin' && isUsable(w)).length === 1) {
     throw Object.assign(new Error('Tem de ficar pelo menos um Administrador ativo.'), { code: 'LAST_ADMIN' })
   }
 }

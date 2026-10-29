@@ -2,6 +2,8 @@
 const KEY = 'timp-ponto-settings'
 
 const DEFAULTS = {
+  engine: 'faceres', // motor de reconhecimento: 'faceres' (por omissão) | 'mobilefacenet' (experimental, mais leve)
+  backend: 'webgl', // aceleração gráfica: 'webgl' | 'webgpu' (experimental; cai para webgl se o aparelho não suportar)
   obra: '', // obra onde está o tablet; vai em todas as picagens
   mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
   deviceName: 'Tablet 1',

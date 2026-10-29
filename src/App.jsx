@@ -5,7 +5,7 @@ import Punches from './views/Punches.jsx'
 import Settings from './views/Settings.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync } from './lib/sync.js'
-import { listWorkers, hasUsableAdmin, pendingPunches } from './lib/db.js'
+import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
 import { warmCamera, releaseCamera } from './lib/useCamera.js'
@@ -39,7 +39,7 @@ export default function App() {
     const workers = await listWorkers()
     setHasAdmin(hasUsableAdmin(workers))
     // se o Administrador com sessão aberta perdeu o perfil (ou foi apagado), a sessão termina
-    setAdmin((a) => (a && !workers.some((w) => w.id === a.id && w.role === 'admin' && !w.broken) ? null : a))
+    setAdmin((a) => (a && !workers.some((w) => w.id === a.id && w.role === 'admin' && isUsable(w)) ? null : a))
   }, [])
 
   useEffect(() => {

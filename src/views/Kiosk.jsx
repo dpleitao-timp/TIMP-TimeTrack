@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { initHuman, detect } from '../lib/face.js'
+import { initHuman, detect, backendName, currentEngine } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
 import { listWorkers, enqueuePunch, pendingPunches } from '../lib/db.js'
@@ -115,7 +115,7 @@ function Scan({ settings, direction, setPending, onDone }) {
       setLoading('')
       workers = await listWorkers()
       recognizer = createRecognizer(() => settingsRef.current, workers)
-      if (!workers.length) setBanner({ kind: 'warn', text: t('kiosk.noWorkers') })
+      if (!workers.some((w) => !w.stale && !w.broken)) show({ kind: 'warn', text: workers.length ? t('kiosk.staleWorkers') : t('kiosk.noWorkers') })
 
       const loop = async () => {
         if (stop) return
@@ -123,10 +123,12 @@ function Scan({ settings, direction, setPending, onDone }) {
         if (performance.now() - startedAt > SCAN_TIMEOUT_MS && performance.now() >= pauseUntil) return onDoneRef.current()
         if (performance.now() < pauseUntil) return requestAnimationFrame(loop)
         try {
+          const t0 = performance.now()
           const { face, gestures } = await detect(videoRef.current)
+          const detMs = Math.round(performance.now() - t0)
           if (stop) return
           const r = recognizer.push(face, gestures)
-          setDebug(s.debug ? r : null)
+          setDebug(s.debug ? { ...r, detMs } : null)
           if (r.status === 'none') {
             setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))
             return requestAnimationFrame(loop)
@@ -215,7 +217,7 @@ function Scan({ settings, direction, setPending, onDone }) {
         </div>
         {debug && (
           <div className="debug" onClick={() => setDebug(null)}>
-            {debug.status} · n {debug.frames ?? 0}/{debug.of ?? '-'} · sim {debug.similarity?.toFixed(2) ?? '-'} (2º {debug.second?.toFixed(2) ?? '-'}) · real {debug.real?.toFixed(2) ?? '-'} · live {debug.live?.toFixed(2) ?? '-'}
+            {currentEngine()}/{backendName()} {debug.detMs} ms · {debug.status} · n {debug.frames ?? 0}/{debug.of ?? '-'} · sim {debug.similarity?.toFixed(2) ?? '-'} (2º {debug.second?.toFixed(2) ?? '-'}) · real {debug.real?.toFixed(2) ?? '-'} · live {debug.live?.toFixed(2) ?? '-'}
           </div>
         )}
       </div>

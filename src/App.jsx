@@ -4,7 +4,7 @@ import Enrol from './views/Enrol.jsx'
 import Punches from './views/Punches.jsx'
 import Settings from './views/Settings.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
-import { startAutoSync } from './lib/sync.js'
+import { startAutoSync, syncRoster } from './lib/sync.js'
 import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
@@ -62,6 +62,18 @@ export default function App() {
 
   // reenvio automático da fila (lê sempre as definições mais recentes)
   useEffect(() => startAutoSync(() => loadSettings(), (r) => setPending(r.pending)), [])
+
+  // lista de trabalhadores da obra: ao arrancar, a cada 5 min e quando a rede volta
+  useEffect(() => {
+    const run = () => syncRoster(loadSettings()).then((r) => r.ok && !r.unchanged && window.dispatchEvent(new Event('roster-updated')))
+    run()
+    const timer = setInterval(run, 5 * 60 * 1000)
+    window.addEventListener('online', run)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('online', run)
+    }
+  }, [])
 
   // contador de picagens por enviar, sempre visível no cabeçalho
   useEffect(() => {
@@ -150,6 +162,9 @@ export default function App() {
           {t('app.noAdmin')}
         </p>
       )}
+      <div className="app-version" title={`${__APP_VERSION__} · ${__APP_BUILD__} · ${__APP_DATE__}`}>
+        v{__APP_VERSION__} · {__APP_BUILD__} · {__APP_DATE__}
+      </div>
       {current === 'kiosk' && (
         <Kiosk settings={settings} setPending={setPending} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
       )}

@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { flushQueue } from '../lib/sync.js'
 import { getTheme, setTheme } from '../lib/theme.js'
 import { useT } from '../lib/i18n.jsx'
 import { listCameras } from '../lib/cameras.js'
+import { listRoster, rosterMeta } from '../lib/db.js'
+import { syncRoster } from '../lib/sync.js'
+import { fmtDateTime } from '../lib/date.js'
 
 export default function Settings({ settings, onChange }) {
   const { t } = useT()
@@ -10,6 +13,12 @@ export default function Settings({ settings, onChange }) {
   const [msg, setMsg] = useState('')
   const [theme, setThemeState] = useState(getTheme())
   const [cameras, setCameras] = useState([])
+  const [roster, setRoster] = useState({ n: 0, at: 0 })
+  const [rosterMsg, setRosterMsg] = useState('')
+  const loadRoster = async () => setRoster({ n: (await listRoster()).length, at: (await rosterMeta()).at })
+  useEffect(() => {
+    loadRoster()
+  }, [])
   const [camMsg, setCamMsg] = useState('')
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
@@ -160,6 +169,26 @@ export default function Settings({ settings, onChange }) {
               {s.cameraId && !cameras.some((c) => c.id === s.cameraId) && <option value={s.cameraId}>{t('settings.cameraSaved')}</option>}
             </select>
           </label>
+        </div>
+
+        <div className="card">
+          <h2>{t('settings.roster')}</h2>
+          <p className="muted" style={{ marginTop: 0 }}>{t('settings.rosterHint')}</p>
+          <p>{roster.at ? t('settings.rosterStatus', { n: roster.n, date: fmtDateTime(roster.at) }) : t('settings.rosterNone')}</p>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={async () => {
+              setRosterMsg('')
+              const r = await syncRoster({ ...settings, ...s, obra: (s.obra || '').trim() }, { force: true })
+              setRosterMsg(r.ok ? t('settings.rosterOk') : t('settings.rosterError', { err: r.error }))
+              await loadRoster()
+              if (r.ok) window.dispatchEvent(new Event('roster-updated'))
+            }}
+          >
+            {t('settings.rosterRefresh')}
+          </button>
+          {rosterMsg && <p className="muted">{rosterMsg}</p>}
         </div>
 
         <div className="card">

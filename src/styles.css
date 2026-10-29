@@ -350,3 +350,15 @@ body::before {
 .date-field-btn { min-height: 40px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--card-bg); box-shadow: var(--shadow); }
 .date-field-native { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 
+
+/* Versão do software, no canto inferior direito */
+.app-version { position: fixed; right: 10px; bottom: 6px; z-index: 5; font-size: 11px; color: var(--text-muted); opacity: 0.75; pointer-events: none; user-select: none; }
+
+/* Lista de trabalhadores por registar (Registar): uma só coluna, com scroll */
+.roster-chips { margin: -4px 0 14px; }
+.roster-chips > div { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 320px; overflow-y: auto; padding-right: 2px; }
+.roster-chips .chip { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--bg); color: var(--text); font-size: 0.92rem; font-weight: 600; text-align: left; }
+.roster-chips .chip small { color: var(--text-muted); font-weight: 500; }
+.roster-chips .chip:hover { background: var(--accent-bg); }
+.roster-chips .chip.on { background: var(--accent); color: var(--accent-contrast); }
+.roster-chips .chip.on small { color: rgba(255, 255, 255, 0.8); }

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS devices (
   id          TEXT PRIMARY KEY,              -- ex.: dev-a1b2c3d4
   token_hash  TEXT NOT NULL,                 -- sha256 hex do token do tablet (o token em claro nunca é guardado)
   active      INTEGER NOT NULL DEFAULT 1,    -- 0 = revogado
+  obra        TEXT,                          -- obra do tablet: se definida, a lista de trabalhadores é só dessa obra
   created_at  INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
@@ -16,3 +17,14 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 
 CREATE INDEX IF NOT EXISTS outbox_device_idx ON outbox (device_id);
+
+-- Lista de trabalhadores por obra (enviada pelo Supabase, lida pelos tablets). Só SAGE ID e nome.
+CREATE TABLE IF NOT EXISTS roster (
+  sage_id TEXT NOT NULL,
+  obra    TEXT NOT NULL,
+  name    TEXT NOT NULL,
+  active  INTEGER NOT NULL DEFAULT 1,
+  gen     INTEGER NOT NULL,                  -- instante do envio; os registos de envios antigos são apagados no fim
+  PRIMARY KEY (sage_id, obra)
+);
+CREATE INDEX IF NOT EXISTS roster_obra_idx ON roster (obra);

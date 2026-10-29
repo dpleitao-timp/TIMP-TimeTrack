@@ -1,4 +1,4 @@
-import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected } from './db.js'
+import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, replaceRoster, touchRoster, rosterMeta } from './db.js'
 import { isCloudConfigured } from './settings.js'
 
 const BATCH = 50
@@ -61,6 +61,28 @@ export async function flushQueue(settings) {
     running = false
   }
   return { sent, pending: (await pendingPunches()).length }
+}
+
+// Lista de trabalhadores da obra, lida do relay (o Supabase publica-a lá). O tablet nunca fala com o Supabase.
+// Devolve { ok, count?, unchanged?, error? }.
+export async function syncRoster(settings, { force = false } = {}) {
+  if (!isCloudConfigured(settings)) return { ok: false, error: 'not-configured' }
+  if (!navigator.onLine) return { ok: false, error: 'offline' }
+  try {
+    const { gen } = await rosterMeta()
+    const qs = new URLSearchParams({ device: settings.deviceId, obra: settings.obra || '', since: force ? '0' : String(gen) })
+    const res = await fetch(`${settings.relayUrl.replace(/\/$/, '')}/roster?${qs}`, { headers: { 'x-device-token': settings.deviceToken } })
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+    const body = await res.json()
+    if (body.unchanged) {
+      await touchRoster()
+      return { ok: true, unchanged: true }
+    }
+    await replaceRoster(body.workers ?? [], body.generatedAt)
+    return { ok: true, count: (body.workers ?? []).length }
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) }
+  }
 }
 
 // Arranca reenvio automático: ao voltar online e a cada 20 s.

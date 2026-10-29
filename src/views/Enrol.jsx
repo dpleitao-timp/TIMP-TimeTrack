@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, bestMatch, meanEmbedding } from '../lib/face.js'
 import { ENGINE } from '../lib/settings.js'
-import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin, isUsable } from '../lib/db.js'
+import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin, isUsable, listRoster, rosterMeta } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 import { useT } from '../lib/i18n.jsx'
 
@@ -37,12 +37,43 @@ export default function Enrol({ settings, onRegistered }) {
   const [loading, setLoading] = useState(true)
   const [live, setLive] = useState('')
   const [workers, setWorkers] = useState([])
+  const [roster, setRoster] = useState([]) // lista de trabalhadores da obra (vem do relay)
+  const [rosterAt, setRosterAt] = useState(0) // quando foi sincronizada (0 = nunca)
+  const [pick, setPick] = useState('')
   const runRef = useRef({ active: false })
 
-  const refresh = async () => setWorkers(await listWorkers())
+  const refresh = async () => {
+    setWorkers(await listWorkers())
+    setRoster(await listRoster())
+    setRosterAt((await rosterMeta()).at)
+  }
+  const pickWorker = (w) => {
+    setPick(`${w.name} (${w.sageId})`)
+    setSageId(w.sageId)
+    setName(w.name)
+    setMsg('')
+  }
+  const onPick = (value) => {
+    setPick(value)
+    const q = value.trim().toLowerCase()
+    const hit = roster.find((w) => `${w.name} (${w.sageId})`.toLowerCase() === q || w.sageId.toLowerCase() === q)
+    if (hit) pickWorker(hit)
+  }
+  const enrolledIds = new Set(workers.map((w) => w.id))
+  // Registado neste tablet mas já fora da lista da obra (saiu da obra, ou ainda não entrou). Só é um aviso:
+  // não bloqueia nada; serve para o Administrador ver quem apagar. Sem lista sincronizada não se avisa.
+  const outOfRoster = (w) => rosterAt > 0 && !roster.some((r) => r.sageId === w.id)
+  const outCount = workers.filter(outOfRoster).length
+  const toEnrol = roster.filter((w) => !enrolledIds.has(w.sageId))
+  const notInRoster = roster.length > 0 && !replacing && !adding && sageId.trim() !== '' && !roster.some((w) => w.sageId === sageId.trim())
   const usableAdmins = workers.filter((w) => w.role === 'admin' && isUsable(w)).length
   const firstRegistration = usableAdmins === 0
   const steps = adding ? PPE_STEPS : STEPS
+
+  useEffect(() => {
+    window.addEventListener('roster-updated', refresh)
+    return () => window.removeEventListener('roster-updated', refresh)
+  }, [])
 
   useEffect(() => {
     refresh()
@@ -128,6 +159,7 @@ export default function Enrol({ settings, onRegistered }) {
       }
       setReplacing(null)
       setAdding(null)
+      setPick('')
       setName('')
       setSageId('')
       setMakeAdmin(false)
@@ -151,6 +183,46 @@ export default function Enrol({ settings, onRegistered }) {
       <div className="enrol-form">
         <div className="card">
           <h2>{adding ? t('enrol.addPpeTitle', { name: adding.name }) : replacing ? t('enrol.updateTitle', { name: replacing.name }) : t('enrol.title')}</h2>
+          {roster.length > 0 && !replacing && !adding && (
+            <>
+              <label className="field">
+                {t('enrol.roster')}
+                <input
+                  className="field-input"
+                  list="roster-list"
+                  placeholder={t('enrol.rosterSearch')}
+                  value={pick}
+                  onChange={(e) => onPick(e.target.value)}
+                  disabled={capturing}
+                  autoComplete="off"
+                />
+                <datalist id="roster-list">
+                  {roster.map((w) => (
+                    <option key={w.sageId} value={`${w.name} (${w.sageId})`} />
+                  ))}
+                </datalist>
+              </label>
+              {toEnrol.length > 0 && (
+                <div className="roster-chips">
+                  <span className="muted">{t('enrol.toEnrol', { n: toEnrol.length })}</span>
+                  <div>
+                    {toEnrol.map((w) => (
+                      <button
+                        key={w.sageId}
+                        type="button"
+                        className={`chip ${w.sageId === sageId.trim() ? 'on' : ''}`}
+                        disabled={capturing}
+                        onClick={() => pickWorker(w)}
+                      >
+                        {w.name}
+                        <small>{w.sageId}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
           <label className="field">
             {t('enrol.sage')}
             <input className="field-input" value={sageId} onChange={(e) => setSageId(e.target.value)} disabled={capturing || !!replacing || !!adding} inputMode="numeric" autoComplete="off" />
@@ -159,6 +231,7 @@ export default function Enrol({ settings, onRegistered }) {
             {t('enrol.name')}
             <input className="field-input" value={name} onChange={(e) => setName(e.target.value)} disabled={capturing} autoComplete="off" />
           </label>
+          {notInRoster && <p className="notice notice-warn">{t('enrol.notInRoster')}</p>}
           <button type="button" className="switch-row" disabled={capturing || firstRegistration || !!replacing || !!adding} onClick={() => setMakeAdmin(!makeAdmin)}>
             <span>
               {t('enrol.adminProfile')}
@@ -197,13 +270,15 @@ export default function Enrol({ settings, onRegistered }) {
         </div>
 
         <h3>{t('enrol.registered', { n: workers.length })}</h3>
+        {outCount > 0 && <p className="notice notice-warn">{t('enrol.outOfRosterSummary', { n: outCount })}</p>}
         <div className="card">
           <ul className="workers">
             {!workers.length && <li className="muted">{t('enrol.none')}</li>}
             {workers.map((w) => (
               <li key={w.id}>
                 <span>
-                  {w.name} {w.role === 'admin' && <span className="pill pill-ok">{t('enrol.adminBadge')}</span>}
+                  {w.name} {w.role === 'admin' && <span className="pill pill-ok">{t('enrol.adminBadge')}</span>}{' '}
+                  {outOfRoster(w) && <span className="pill pill-warn">{t('enrol.outOfRoster')}</span>}
                   <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : w.stale ? t('enrol.otherEngine', { engine: w.engine }) : t('enrol.vectors', { n: w.embeddings.length })}</small>
                 </span>
                 <span className="btn-row">

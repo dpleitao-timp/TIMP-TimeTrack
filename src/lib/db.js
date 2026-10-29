@@ -4,11 +4,14 @@ import { ENGINE } from './settings.js'
 // IndexedDB local: trabalhadores (embeddings encriptados), fila de picagens e meta.
 let dbPromise
 function db() {
-  dbPromise ??= openDB('timp-ponto', 1, {
-    upgrade(d) {
-      d.createObjectStore('workers', { keyPath: 'id' })
-      d.createObjectStore('queue', { keyPath: 'eventId' })
-      d.createObjectStore('meta')
+  dbPromise ??= openDB('timp-ponto', 2, {
+    upgrade(d, oldVersion) {
+      if (oldVersion < 1) {
+        d.createObjectStore('workers', { keyPath: 'id' })
+        d.createObjectStore('queue', { keyPath: 'eventId' })
+        d.createObjectStore('meta')
+      }
+      if (oldVersion < 2) d.createObjectStore('roster', { keyPath: 'sageId' }) // lista de trabalhadores da obra (vem do relay)
     },
   })
   return dbPromise
@@ -89,6 +92,32 @@ async function assertNotLastAdmin(id, { allowIfOnlyWorker = false } = {}) {
   if (target?.role === 'admin' && isUsable(target) && workers.filter((w) => w.role === 'admin' && isUsable(w)).length === 1) {
     throw Object.assign(new Error('Tem de ficar pelo menos um Administrador ativo.'), { code: 'LAST_ADMIN' })
   }
+}
+
+// --- Lista de trabalhadores da obra (publicada pelo Supabase, lida do relay): só SAGE ID e nome ---
+export async function replaceRoster(workers, generatedAt) {
+  const d = await db()
+  const tx = d.transaction(['roster', 'meta'], 'readwrite')
+  await tx.objectStore('roster').clear()
+  for (const w of workers) await tx.objectStore('roster').put({ sageId: String(w.sageId), name: w.name })
+  await tx.objectStore('meta').put(generatedAt ?? 0, 'rosterGen')
+  await tx.objectStore('meta').put(Date.now(), 'rosterAt')
+  await tx.done
+}
+
+export async function touchRoster() {
+  const d = await db()
+  await d.put('meta', Date.now(), 'rosterAt')
+}
+
+export async function listRoster() {
+  const d = await db()
+  return (await d.getAll('roster')).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export async function rosterMeta() {
+  const d = await db()
+  return { gen: (await d.get('meta', 'rosterGen')) || 0, at: (await d.get('meta', 'rosterAt')) || 0 }
 }
 
 export async function setWorkerRole(id, role) {

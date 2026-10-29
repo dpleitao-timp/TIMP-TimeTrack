@@ -86,5 +86,41 @@ check('POST /ack apaga as picagens lidas', r.status === 200 && (await r.json()).
 r = await signed('GET', '/pull?limit=50')
 check('depois do ack o relay fica vazio', (await r.json()).punches.length === 0)
 
+// 6. lista de trabalhadores: o Supabase publica, o tablet lê só a sua obra
+const gen = Date.now()
+const roster = [
+  { sageId: 'S1', name: 'Ana Silva', obra: 'OBRA-TESTE', active: true },
+  { sageId: 'S2', name: 'Bruno Costa', obra: 'OBRA-TESTE', active: true },
+  { sageId: 'S3', name: 'Carla Dias', obra: 'OBRA-TESTE', active: false },
+  { sageId: 'S4', name: 'Diogo Reis', obra: 'OUTRA-OBRA', active: true },
+  { sageId: '', name: 'sem id', obra: 'OBRA-TESTE', active: true },
+]
+r = await fetch(`${RELAY}/roster`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-device-token': TOKEN }, body: JSON.stringify({ gen, final: true, workers: roster }) })
+check('tablet não pode publicar a lista → 401', r.status === 401)
+const body = JSON.stringify({ gen, final: true, workers: roster })
+r = await signed('POST', '/roster', body)
+j = await r.json()
+check('Supabase publica a lista assinada (4 válidos, 1 recusado)', r.status === 200 && j.stored === 4 && j.rejected === 1, JSON.stringify(j))
+const getRoster = (qs, token = TOKEN) => fetch(`${RELAY}/roster?device=${DEVICE}${qs}`, { headers: { 'x-device-token': token } })
+r = await getRoster('&obra=OBRA-TESTE')
+j = await r.json()
+check('tablet lê só os ativos da sua obra, por nome', r.status === 200 && j.workers.map((w) => w.sageId).join() === 'S1,S2' && j.workers.every((w) => !('obra' in w)), JSON.stringify(j))
+const genOut = j.generatedAt
+r = await getRoster('&obra=%20obra-teste%20')
+check('a obra compara-se sem maiúsculas nem espaços', (await r.json()).workers?.length === 2)
+r = await getRoster(`&obra=OBRA-TESTE&since=${genOut}`)
+check('sem alterações devolve unchanged', (await r.json()).unchanged === true)
+r = await getRoster('&obra=OBRA-TESTE', 'token-errado')
+check('token errado na lista → 401', r.status === 401)
+r = await getRoster('')
+check('sem obra → 400', r.status === 400)
+const body2 = JSON.stringify({ gen: gen + 1, final: true, workers: [{ sageId: 'S2', name: 'Bruno C.', obra: 'OBRA-TESTE', active: true }] })
+r = await signed('POST', '/roster', body2)
+r = await getRoster('&obra=OBRA-TESTE')
+j = await r.json()
+check('novo envio apaga quem saiu da lista e atualiza nomes', j.workers.length === 1 && j.workers[0].name === 'Bruno C.', JSON.stringify(j))
+r = await signed('POST', '/roster', JSON.stringify({ gen: gen + 2, final: true, workers: [] }))
+check('lista vazia limpa tudo', ((await (await getRoster('&obra=OBRA-TESTE')).json()).workers || []).length === 0)
+
 console.log(failed ? `\n${failed} teste(s) falharam` : '\nTudo OK')
 process.exit(failed ? 1 : 0)

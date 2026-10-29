@@ -52,6 +52,19 @@ Os modelos de reconhecimento (≈13 MB, em cache no service worker e na IndexedD
 
 **Câmara sempre ligada:** a câmara abre-se no arranque e fica aberta (partilhada entre os ecrãs), por isso escolher Entrada/Saída já a encontra pronta. Só passa a ser analisada depois dessa escolha e, enquanto não se escolhe, não se mostra nem se processa nenhuma imagem (a luz da câmara fica acesa). Isto substitui a regra anterior "a câmara só liga depois de escolher" e deve constar da avaliação de impacto (DPIA).
 
+## Lista de trabalhadores da obra (Supabase → relay → tablet)
+O Registar deixa de ser texto livre: o tablet mostra os trabalhadores da **sua obra**, com pesquisa por nome ou SAGE ID e a lista de quem **falta registar**.
+```
+Supabase ──POST /roster (assinado)──► Relay ◄──GET /roster (token do dispositivo)── Tablet
+```
+- **Supabase:** a função `publish-roster` lê a vista `timetrack_roster` (migração 005, sobre `workers`, `worker_work_sites`, `work_sites` e, para os **outsourced**, `workers_others` com o seu `punch_code` de 6 caracteres, criado pelo `db/313` da intranet, que **tem de ser aplicado antes**; só a service role a lê) e publica no relay a cada 15 min (migrações 005 e 006). Só vão os ativos, e só SAGE ID, nome e obra.
+- **Relay:** tabela `roster` + `GET/POST /roster` (migração `relay/migrations/002_roster.sql`). Se o dispositivo tiver **obra** no relay, só recebe os dessa obra: `node relay/scripts/add-device.mjs dev-entrada <obra>` ou `UPDATE devices SET obra = '<obra>' WHERE id = 'dev-entrada'`. Sem obra no relay usa a que o tablet indica.
+- **Tablet:** sincroniza ao arrancar, a cada 5 min e quando a rede volta; Definições → Lista de trabalhadores mostra quantos e quando, com "Atualizar lista agora". Se o SAGE ID escrito à mão não estiver na lista, aparece um aviso (não bloqueia). Os trabalhadores já registados no tablet que deixaram de estar na lista (saíram da obra ou ainda não entraram) aparecem com a etiqueta "fora da lista da obra" e um resumo por cima, para o Administrador os apagar; é só um aviso, a picagem não é bloqueada.
+- O relay passa a guardar **nomes** (dados pessoais): constar da avaliação de RGPD; só se enviam os trabalhadores ativos e cada tablet lê só os da sua obra.
+
+## Versão
+O canto inferior direito mostra `v<versão> · <commit> · <data>` (a versão vem do `package.json`; o `+` depois do commit indica que a compilação tinha alterações por commitar). Serve para confirmar que o tablet já tem a versão publicada.
+
 ## Intervalo mínimo entre picagens
 O intervalo (Definições, em segundos) é calculado a partir das picagens guardadas no tablet, por isso sobrevive a recargas, atualizações e reinícios. Aplica-se ao mesmo trabalhador, em qualquer direção, **neste tablet**: dois tablets (entrada e saída) não partilham a lista, por isso um intervalo entre os dois terá de ser verificado no Supabase/intranet. Apagar uma picagem por enviar deixa o trabalhador picar logo outra vez.
 

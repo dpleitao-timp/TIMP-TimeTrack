@@ -1,8 +1,30 @@
+import { readFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Versão mostrada no canto inferior direito: versão do package.json, commit (com "+" se houver alterações por
+// commitar) e data da compilação (dd/mm/yyyy). Serve para confirmar que o tablet tem a versão certa.
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+const git = (cmd) => {
+  try {
+    return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+  } catch {
+    return ''
+  }
+}
+const commit = git('git rev-parse --short HEAD') || 'dev'
+const dirty = git('git status --porcelain') ? '+' : ''
+const d = new Date()
+const buildDate = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_BUILD__: JSON.stringify(`${commit}${dirty}`),
+    __APP_DATE__: JSON.stringify(buildDate),
+  },
   plugins: [
     react(),
     VitePWA({

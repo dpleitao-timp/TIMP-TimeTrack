@@ -1,6 +1,6 @@
 {
   "name": "timp-timetrack",
-  "version": "1.0.0",
+  "version": "26.0.0",
   "description": "Relógio de ponto facial - mockup PWA",
   "scripts": {
     "dev": "vite --host",

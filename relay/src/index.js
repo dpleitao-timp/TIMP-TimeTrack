@@ -1,9 +1,10 @@
 // Relay de picagens (Cloudflare Worker + D1).
 //
 //   Tablet  ── POST /punch ──►  [outbox]  ◄── GET /pull, POST /ack ──  Supabase
+//   Tablet  ◄── GET /roster ──  [roster]  ◄── POST /roster ──  Supabase
 //
-// O tablet só escreve (token do dispositivo). O Supabase só lê e confirma (pedidos
-// assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
+// O tablet escreve picagens e lê a lista de trabalhadores (token do dispositivo). O Supabase lê as picagens,
+// confirma-as e publica a lista (pedidos assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
 
 const MAX_BATCH = 200
 const MAX_BODY_BYTES = 256 * 1024
@@ -13,6 +14,8 @@ const MAX_BACKLOG_PER_DEVICE = 50000 // evita encher a base de dados
 const MAX_PULL = 500
 const MAX_ACK = 500
 const SIGNATURE_SKEW_S = 300
+const MAX_ROSTER_CHUNK = 500
+const MAX_ROSTER_LIST = 3000 // trabalhadores devolvidos a um tablet
 
 const enc = new TextEncoder()
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -32,7 +35,7 @@ function corsHeaders(env) {
   return {
     'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
     'Access-Control-Allow-Headers': 'content-type, x-device-token',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Max-Age': '86400',
   }
 }
@@ -161,10 +164,74 @@ async function handleAck(request, url, env) {
   return json({ deleted: ids.length })
 }
 
+// ------------------------------------------------------------------ Supabase → relay: lista de trabalhadores
+// Corpo: { gen, final, workers: [{ sageId, name, obra, active }] }. O Supabase envia a lista em blocos com o mesmo `gen`;
+// no último bloco (`final`) apagam-se os registos de envios anteriores (quem saiu da lista desaparece).
+async function handleRosterPost(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  const gen = body?.gen
+  const workers = body?.workers
+  if (!Number.isSafeInteger(gen) || gen <= 0 || !Array.isArray(workers) || workers.length > MAX_ROSTER_CHUNK) return json({ error: 'invalid_payload' }, 400)
+  const valid = (w) =>
+    typeof w?.sageId === 'string' && w.sageId.trim() !== '' && w.sageId.length <= 32 &&
+    typeof w?.name === 'string' && w.name.trim() !== '' && w.name.length <= 120 &&
+    typeof w?.obra === 'string' && w.obra.trim() !== '' && w.obra.length <= 64
+  const stmts = []
+  let rejected = 0
+  for (const w of workers) {
+    if (!valid(w)) {
+      rejected++
+      continue
+    }
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO roster (sage_id, obra, name, active, gen) VALUES (?, ?, ?, ?, ?) ON CONFLICT(sage_id, obra) DO UPDATE SET name = excluded.name, active = excluded.active, gen = excluded.gen',
+      ).bind(w.sageId.trim(), w.obra.trim(), w.name.trim(), w.active === false ? 0 : 1, gen),
+    )
+  }
+  if (body.final === true) stmts.push(env.DB.prepare('DELETE FROM roster WHERE gen <> ?').bind(gen))
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ stored: workers.length - rejected, rejected })
+}
+
+// ------------------------------------------------------------------ tablet ← relay: lista da obra do tablet
+// GET /roster?device=<id>&obra=<obra>&since=<gen>  (cabeçalho x-device-token)
+// Se o dispositivo tem obra definida no relay, usa-se essa (o tablet não consegue pedir outras obras).
+// A obra compara-se sem distinguir maiúsculas nem espaços nas pontas, como a intranet (db/305).
+async function handleRosterGet(request, url, env) {
+  const cors = corsHeaders(env)
+  const token = request.headers.get('x-device-token')
+  const deviceId = url.searchParams.get('device') || ''
+  if (!token || !deviceId) return json({ error: 'missing_token' }, 401, cors)
+  const device = await env.DB.prepare('SELECT token_hash, active, obra FROM devices WHERE id = ?').bind(deviceId).first()
+  if (!device || !device.active || !timingSafeEqualHex(device.token_hash, await sha256Hex(token))) {
+    return json({ error: 'invalid_device' }, 401, cors)
+  }
+  const obra = (device.obra || url.searchParams.get('obra') || '').trim()
+  if (!obra) return json({ error: 'missing_obra' }, 400, cors)
+
+  const head = await env.DB.prepare('SELECT MAX(gen) AS gen FROM roster').first()
+  const generatedAt = head?.gen ?? 0
+  if (generatedAt && Number(url.searchParams.get('since')) === generatedAt) return json({ unchanged: true, generatedAt }, 200, cors)
+
+  const { results } = await env.DB.prepare('SELECT sage_id, name FROM roster WHERE lower(trim(obra)) = lower(?) AND active = 1 ORDER BY name LIMIT ?').bind(obra, MAX_ROSTER_LIST).all()
+  return json({ generatedAt, obra, workers: results.map((r) => ({ sageId: r.sage_id, name: r.name })) }, 200, cors)
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (request.method === 'OPTIONS' && url.pathname === '/punch') return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'OPTIONS' && (url.pathname === '/punch' || url.pathname === '/roster')) return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'POST' && url.pathname === '/roster') return handleRosterPost(request, url, env)
+    if (request.method === 'GET' && url.pathname === '/roster') return handleRosterGet(request, url, env)
     if (request.method === 'POST' && url.pathname === '/punch') return handlePunch(request, env)
     if (request.method === 'GET' && url.pathname === '/pull') return handlePull(request, url, env)
     if (request.method === 'POST' && url.pathname === '/ack') return handleAck(request, url, env)

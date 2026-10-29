@@ -27,6 +27,13 @@ export default function Settings({ settings, onChange }) {
     const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence) }
     onChange(next)
     setMsg(t('settings.saved'))
+    if (next.obra.toLowerCase() !== (settings.obra || '').trim().toLowerCase()) {
+      // mudou a obra: vai buscar já a lista da nova obra
+      syncRoster(next).then((r) => {
+        loadRoster()
+        if (r.ok) window.dispatchEvent(new Event('roster-updated'))
+      })
+    }
     const r = await flushQueue(next)
     if (r.sent) setMsg(t('settings.savedSent', { n: r.sent }))
     if (reload) setTimeout(() => location.reload(), 600) // o motor e o backend só mudam ao recarregar

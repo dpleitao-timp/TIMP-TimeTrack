@@ -95,12 +95,13 @@ async function assertNotLastAdmin(id, { allowIfOnlyWorker = false } = {}) {
 }
 
 // --- Lista de trabalhadores da obra (publicada pelo Supabase, lida do relay): só SAGE ID e nome ---
-export async function replaceRoster(workers, generatedAt) {
+export async function replaceRoster(workers, generatedAt, obra = '') {
   const d = await db()
   const tx = d.transaction(['roster', 'meta'], 'readwrite')
   await tx.objectStore('roster').clear()
   for (const w of workers) await tx.objectStore('roster').put({ sageId: String(w.sageId), name: w.name })
   await tx.objectStore('meta').put(generatedAt ?? 0, 'rosterGen')
+  await tx.objectStore('meta').put(obra, 'rosterObra') // a obra a que esta lista pertence
   await tx.objectStore('meta').put(Date.now(), 'rosterAt')
   await tx.done
 }
@@ -117,7 +118,7 @@ export async function listRoster() {
 
 export async function rosterMeta() {
   const d = await db()
-  return { gen: (await d.get('meta', 'rosterGen')) || 0, at: (await d.get('meta', 'rosterAt')) || 0 }
+  return { gen: (await d.get('meta', 'rosterGen')) || 0, at: (await d.get('meta', 'rosterAt')) || 0, obra: (await d.get('meta', 'rosterObra')) || '' }
 }
 
 export async function setWorkerRole(id, role) {

@@ -69,8 +69,11 @@ export async function syncRoster(settings, { force = false } = {}) {
   if (!isCloudConfigured(settings)) return { ok: false, error: 'not-configured' }
   if (!navigator.onLine) return { ok: false, error: 'offline' }
   try {
-    const { gen } = await rosterMeta()
-    const qs = new URLSearchParams({ device: settings.deviceId, obra: settings.obra || '', since: force ? '0' : String(gen) })
+    const { gen, obra: storedObra } = await rosterMeta()
+    const obra = (settings.obra || '').trim()
+    // Mudou a obra do tablet: a lista guardada é de outra obra, por isso lê-se sempre de novo (o "gen" é global e diria "sem alterações").
+    const sameObra = storedObra.toLowerCase() === obra.toLowerCase()
+    const qs = new URLSearchParams({ device: settings.deviceId, obra, since: force || !sameObra ? '0' : String(gen) })
     const res = await fetch(`${settings.relayUrl.replace(/\/$/, '')}/roster?${qs}`, { headers: { 'x-device-token': settings.deviceToken } })
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
     const body = await res.json()
@@ -78,7 +81,7 @@ export async function syncRoster(settings, { force = false } = {}) {
       await touchRoster()
       return { ok: true, unchanged: true }
     }
-    await replaceRoster(body.workers ?? [], body.generatedAt)
+    await replaceRoster(body.workers ?? [], body.generatedAt, obra)
     return { ok: true, count: (body.workers ?? []).length }
   } catch (e) {
     return { ok: false, error: String(e?.message || e) }

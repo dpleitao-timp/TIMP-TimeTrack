@@ -1,5 +1,5 @@
 import { openDB } from 'idb'
-import { loadSettings } from './settings.js'
+import { ENGINE } from './settings.js'
 
 // IndexedDB local: trabalhadores (embeddings encriptados), fila de picagens e meta.
 let dbPromise
@@ -51,7 +51,7 @@ async function decrypt({ iv, data }) {
 export async function saveWorker({ id, name, embeddings, role = 'user', createdAt, engine }) {
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
-  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? loadSettings().engine })
+  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? ENGINE })
 }
 
 export async function listWorkers() {
@@ -65,7 +65,7 @@ export async function listWorkers() {
     rows.map(async (w) => {
       const engine = w.engine ?? 'faceres' // registos anteriores ao motor alternativo
       // `stale`: biometria feita com outro motor; não serve para reconhecer até ser atualizada
-      const base = { id: w.id, name: w.name, createdAt: w.createdAt, engine, stale: engine !== loadSettings().engine, role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user' }
+      const base = { id: w.id, name: w.name, createdAt: w.createdAt, engine, stale: engine !== ENGINE, role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user' }
       try {
         return { ...base, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
       } catch {

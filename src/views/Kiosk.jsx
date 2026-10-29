@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { initHuman, detect, backendName, currentEngine } from '../lib/face.js'
+import { initHuman, detect, backendName } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
 import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch } from '../lib/db.js'
@@ -215,7 +215,7 @@ function Scan({ settings, direction, setPending, onDone }) {
         </div>
         {debug && (
           <div className="debug" onClick={() => setDebug(null)}>
-            {currentEngine()}/{backendName()} {debug.detMs} ms · {debug.status} · n {debug.frames ?? 0}/{debug.of ?? '-'} · sim {debug.similarity?.toFixed(2) ?? '-'} (2º {debug.second?.toFixed(2) ?? '-'}) · real {debug.real?.toFixed(2) ?? '-'} · live {debug.live?.toFixed(2) ?? '-'}
+            {backendName()} {debug.detMs} ms · {debug.status} · n {debug.frames ?? 0}/{debug.of ?? '-'} · sim {debug.similarity?.toFixed(2) ?? '-'} (2º {debug.second?.toFixed(2) ?? '-'}) · real {debug.real?.toFixed(2) ?? '-'} · live {debug.live?.toFixed(2) ?? '-'}
           </div>
         )}
       </div>

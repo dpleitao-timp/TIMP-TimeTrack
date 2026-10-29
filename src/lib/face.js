@@ -1,12 +1,8 @@
 import Human from '@vladmandic/human'
-import { loadSettings } from './settings.js'
+import { loadSettings, ENGINE } from './settings.js'
 
-// Motor e backend vêm das Definições e só mudam depois de recarregar a app (o Human é criado uma vez).
-export const ENGINES = ['faceres', 'mobilefacenet']
-export const currentEngine = () => {
-  const e = loadSettings().engine
-  return ENGINES.includes(e) ? e : 'faceres'
-}
+// O backend vem das Definições e só muda depois de recarregar a app (o Human é criado uma vez).
+export const currentEngine = () => ENGINE
 
 // Modelos servidos localmente (public/models) e guardados em cache pelo service worker.
 const baseConfig = {
@@ -39,11 +35,6 @@ function buildConfig() {
   const cfg = structuredClone(baseConfig)
   cfg.backend = s.backend === 'webgpu' ? 'webgpu' : 'webgl'
   cfg.face.detector.minConfidence = Number(s.detectorConfidence) || 0.4
-  if (currentEngine() === 'mobilefacenet') {
-    // o MobileFaceNet substitui o descritor do faceres (o Human aproveita o seu resultado como embedding)
-    cfg.face.description = { enabled: false }
-    cfg.face.mobilefacenet = { enabled: true, modelPath: 'mobilefacenet.json' }
-  }
   return cfg
 }
 
@@ -57,7 +48,7 @@ export function initHuman(onStatus) {
     await h.load()
     await h.warmup()
     human = h
-    console.info(`Modelos de reconhecimento (${currentEngine()}, ${h.tf.getBackend()}) prontos em ${Math.round(performance.now() - t0)} ms`)
+    console.info(`Modelos de reconhecimento (${h.tf.getBackend()}) prontos em ${Math.round(performance.now() - t0)} ms`)
     return h
   })().catch((e) => {
     loadPromise = undefined
@@ -77,23 +68,8 @@ export async function detect(video) {
   return { face, gestures: (res.gesture || []).map((g) => g.gesture) }
 }
 
-// Vetores do MobileFaceNet: normalizam-se (L2) para comparar por cosseno; o faceres usa a distância do Human.
-export function prepEmbedding(e) {
-  if (currentEngine() !== 'mobilefacenet') return e
-  let n = 0
-  for (const v of e) n += v * v
-  n = Math.sqrt(n) || 1
-  return e.map((v) => v / n)
-}
-
-// Semelhança 0..1 entre dois vetores do motor atual. No MobileFaceNet o cosseno é mapeado como o Human faz
-// com o faceres (0,2..0,8 → 0..1), para o limiar de confiança significar o mesmo nos dois motores (calibrar no tablet).
-export function similarity(a, b) {
-  if (currentEngine() !== 'mobilefacenet') return human.match.similarity(a, b)
-  let dot = 0
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i]
-  return Math.max(0, Math.min(1, (dot - 0.2) / 0.6))
-}
+// Semelhança 0..1 entre dois vetores (distância normalizada do Human para o descritor do FaceRes).
+export const similarity = (a, b) => human.match.similarity(a, b)
 
 // Trabalhadores registados com outro motor (ou ilegíveis) não participam no reconhecimento.
 const usable = (w) => !w.stale && !w.broken && w.embeddings.length

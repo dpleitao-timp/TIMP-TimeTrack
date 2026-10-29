@@ -14,7 +14,7 @@ export default function Settings({ settings, onChange }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
-    const reload = s.engine !== settings.engine || s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
+    const reload = s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
     const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence) }
     onChange(next)
     setMsg(t('settings.saved'))
@@ -72,14 +72,6 @@ export default function Settings({ settings, onChange }) {
           <label className="field">
             {t('settings.threshold', { v: Number(s.threshold).toFixed(2) })}
             <input type="range" min="0.3" max="0.9" step="0.01" value={s.threshold} onChange={set('threshold')} />
-          </label>
-          <label className="field">
-            {t('settings.engine')}
-            <select className="field-select" value={s.engine} onChange={set('engine')}>
-              <option value="faceres">{t('settings.engineFaceres')}</option>
-              <option value="mobilefacenet">{t('settings.engineMobile')}</option>
-            </select>
-            <small>{t('settings.engineHint')}</small>
           </label>
           <label className="field">
             {t('settings.backend')}

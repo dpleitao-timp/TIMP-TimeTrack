@@ -1,9 +1,12 @@
 // Definições por dispositivo (localStorage). A direção (Entrada/Saída) escolhe-se no ecrã Picar.
 const KEY = 'timp-ponto-settings'
 
+// Motor de reconhecimento (único). Cada registo guarda o motor com que foi feito; os de outro motor
+// (p. ex. o MobileFaceNet, já retirado) ficam obsoletos até se atualizar a biometria.
+export const ENGINE = 'faceres'
+
 const DEFAULTS = {
   detectorConfidence: 0.4, // confiança mínima da deteção do rosto (mais baixa = deteta melhor com capacete/óculos)
-  engine: 'faceres', // motor de reconhecimento: 'faceres' (por omissão) | 'mobilefacenet' (experimental, mais leve)
   backend: 'webgl', // aceleração gráfica: 'webgl' | 'webgpu' (experimental; cai para webgl se o aparelho não suportar)
   obra: '', // obra onde está o tablet; vai em todas as picagens
   mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
@@ -31,6 +34,11 @@ export function loadSettings() {
   }
   const merged = { ...DEFAULTS, ...s }
   // o tablet já não tem ligação direta ao Supabase: apaga o que ficou guardado de versões anteriores
+  if ('engine' in s) {
+    // definição retirada: o motor é sempre o FaceRes
+    delete merged.engine
+    saveSettings(merged)
+  }
   if ('supabaseUrl' in s || 'supabaseAnonKey' in s) {
     delete merged.supabaseUrl
     delete merged.supabaseAnonKey

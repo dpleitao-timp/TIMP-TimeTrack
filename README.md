@@ -62,11 +62,10 @@ O intervalo (Definições, em segundos) é calculado a partir das picagens guard
 - **Menos renderizações** no ecrã de picar: o aviso só se atualiza quando muda.
 - **Modo rápido de vida** (Definições, desligado por omissão): dispensa o piscar quando a média do anti-foto do modelo é ≥ 0,8. Menos seguro; testar com o modo diagnóstico.
 
-## Motor de reconhecimento e aceleração gráfica (experimentais)
-Em Definições → Reconhecimento:
-- **Motor:** `FaceRes` (por omissão) ou `MobileFaceNet` (mais leve, 5 MB; o Human considera-o o motor antigo, por isso a precisão tem de ser **medida no tablet**). Cada registo guarda o motor com que foi feito; mudar de motor obriga a **atualizar a biometria** de cada trabalhador ("atualizar biometria"). Um Administrador registado com o motor antigo deixa de contar; se for o único, a administração abre para o poder atualizar. O MobileFaceNet compara por cosseno (vetores normalizados), mapeado para a mesma escala 0..1 do limiar.
-- **Aceleração:** `WebGL` (por omissão) ou `WebGPU`; se o aparelho não suportar WebGPU, o Human usa WebGL. A app recarrega ao guardar.
-- Para comparar, ligue o **modo diagnóstico**: o ecrã de picar mostra o motor/backend e o tempo da deteção por fotograma (`ms`).
+## Aceleração gráfica (experimental)
+Em Definições → Reconhecimento: `WebGL` (por omissão) ou `WebGPU`; se o aparelho não suportar WebGPU, o Human usa WebGL. A app recarrega ao guardar. Com o **modo diagnóstico** ligado, o ecrã de picar mostra o backend e o tempo da deteção por fotograma (`ms`).
+
+**Motor MobileFaceNet (removido):** foi experimentado e retirado depois de, com o limiar de confiança a 0,8, reconhecer uma filha como o pai (aceitação falsa). O reconhecimento usa só o FaceRes. Cada registo continua a guardar o motor com que foi feito: registos de um motor antigo ficam obsoletos (não reconhecem) até se usar "atualizar biometria", e se o único Administrador ficar obsoleto a administração abre-se para o poder atualizar.
 
 ## Capacete e óculos de proteção
 - **Registo com EPI:** em Registar, "adicionar com EPI" junta ao trabalhador 3 capturas feitas **com o capacete e os óculos postos** (de frente e virando para cada lado), sem apagar as anteriores. O reconhecimento usa o melhor de todos os vetores, por isso reconhece com e sem equipamento.

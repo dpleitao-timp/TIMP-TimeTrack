@@ -14,7 +14,9 @@ const baseConfig = {
   filter: { enabled: false },
   face: {
     enabled: true,
-    detector: { modelPath: 'blazeface.json', rotation: false, maxDetected: 1, minConfidence: 0.5 },
+    // rotation fixo: alinha o rosto inclinado; os registos são feitos com este alinhamento, mudá-lo piora o reconhecimento.
+    // O Human ignora-o em backends que não o suportam.
+    detector: { modelPath: 'blazeface.json', rotation: true, maxDetected: 1, minConfidence: 0.5 },
     mesh: { enabled: true, modelPath: 'facemesh.json' },
     iris: { enabled: false }, // não é preciso: piscar e rotação vêm da malha facial; poupa dois modelos por fotograma
     description: { enabled: true, modelPath: 'faceres.json' },
@@ -35,7 +37,6 @@ function buildConfig() {
   const cfg = structuredClone(baseConfig)
   cfg.backend = s.backend === 'webgpu' ? 'webgpu' : 'webgl'
   cfg.face.detector.minConfidence = Number(s.detectorConfidence) || 0.4
-  cfg.face.detector.rotation = s.detectorRotation !== false // o Human ignora-o se o backend não suportar (p. ex. WebGPU)
   return cfg
 }
 

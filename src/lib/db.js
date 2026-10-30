@@ -157,8 +157,9 @@ export async function setClockOffset(ms) {
 }
 
 // --- Fila de picagens ---
+const round3 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null)
 // eventId = dispositivo + contador => reenvios idempotentes no servidor.
-export async function enqueuePunch({ deviceId, direction, sageId, workerName, obra, confidence }) {
+export async function enqueuePunch({ deviceId, direction, sageId, workerName, obra, confidence, second = null, real = null, live = null }) {
   const d = await db()
   const counter = await nextCounter()
   const offset = await getClockOffset()
@@ -170,6 +171,10 @@ export async function enqueuePunch({ deviceId, direction, sageId, workerName, ob
     obra, // fica na picagem: mudar a obra nas Definições não altera as já registadas
     workerName, // só local: nunca vai para a cloud
     confidence: Math.round(confidence * 1000) / 1000,
+    // dados para afinar o reconhecimento (2º mais parecido e anti-foto); não afetam a picagem
+    second: round3(second),
+    real: round3(real),
+    live: round3(live),
     punchedAt: new Date(Date.now() + offset).toISOString(),
     synced: 0, // 0 = pendente, 1 = enviada (índice simples sem criar index)
     attempts: 0,

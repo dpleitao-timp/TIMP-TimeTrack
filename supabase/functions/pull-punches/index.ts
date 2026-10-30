@@ -14,6 +14,7 @@ const BATCH = 200
 const MAX_BATCHES = 10 // por execução; o resto fica para a próxima
 const MAX_FUTURE_MS = 5 * 60 * 1000
 const MAX_PAST_MS = 14 * 24 * 3600 * 1000
+const unit = (v: unknown) => (typeof v === 'number' && v >= 0 && v <= 1 ? v : null) // 0..1 ou null
 
 const enc = new TextEncoder()
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -88,6 +89,10 @@ Deno.serve(async (req) => {
           direction: p.direction,
           punched_at: new Date(t).toISOString(),
           confidence: typeof p.confidence === 'number' ? p.confidence : null,
+          // dados para afinar o reconhecimento (colunas temporárias, migração 008)
+          second_similarity: unit(p.second),
+          antispoof_real: unit(p.real),
+          antispoof_live: unit(p.live),
         })
       }
 

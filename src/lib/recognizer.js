@@ -116,6 +116,7 @@ export function createRecognizer(getSettings, workers) {
     const second = ranked[1]
     info.similarity = best?.similarity ?? 0
     info.second = second?.similarity ?? 0
+    info.hasSecond = !!second // false quando só há um trabalhador utilizável (o 2º = 0 não quer dizer "nada parecido")
     if (early) {
       const strong = best && best.similarity >= s.threshold + STRONG_SIM && (!second || best.similarity - second.similarity >= STRONG_MARGIN)
       if (!strong) return { status: 'collecting', ...info } // espera pelos restantes fotogramas

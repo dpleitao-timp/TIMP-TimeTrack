@@ -12,6 +12,7 @@ import AdminLogin from './AdminLogin.jsx'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const FAST_REAL = 0.8 // confiança mínima do anti-foto para dispensar o piscar no modo rápido
+const BAD_SHOW_MS = 1500 // "foto" / "não reconhecido" só aparecem se durarem isto sem interrupção
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
 
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
@@ -108,6 +109,7 @@ function Scan({ settings, direction, setPending, onDone }) {
     let recognizer = null
     let pauseUntil = 0
     let lastReject = 0
+    let badSince = 0 // desde quando o estado é spoof/unknown sem interrupção (0 = não está)
 
     ;(async () => {
       await initHuman()
@@ -136,27 +138,35 @@ function Scan({ settings, direction, setPending, onDone }) {
             setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))
             return requestAnimationFrame(loop)
           }
-          if (r.status === 'collecting' || r.status === 'confirming') {
+          const now = performance.now()
+          const confident = s.fastLiveness && r.real >= FAST_REAL && r.live >= FAST_REAL // modo rápido: o modelo já tem a certeza
+          const alive = !s.liveness || r.blink || r.turn || confident
+          if (r.status !== 'spoof' && r.status !== 'unknown') badSince = 0
+          if (r.status === 'collecting') {
             show({ kind: 'idle', text: t('kiosk.recognizing') })
             return requestAnimationFrame(loop)
           }
-          if (r.status === 'spoof') {
-            if (performance.now() - lastReject > 2000) bumpStat('spoofRejected')
-            lastReject = performance.now()
-            show({ kind: 'bad', text: t('kiosk.spoof') })
+          if (r.status === 'confirming') {
+            // já se sabe quem é: pede logo para piscar, em vez de esperar pela confirmação final
+            show(alive ? { kind: 'idle', text: t('kiosk.recognizing') } : { kind: 'warn', text: t('kiosk.blink', { name: r.worker.name }) })
             return requestAnimationFrame(loop)
           }
-          if (r.status === 'unknown') {
-            if (performance.now() - lastReject > 2000) bumpStat('unknown')
-            lastReject = performance.now()
-            show({ kind: 'bad', text: t('kiosk.unknown') })
+          if (r.status === 'spoof' || r.status === 'unknown') {
+            // Estes estados tremem de fotograma para fotograma (a semelhança anda à volta do limiar, o modelo anti-foto
+            // demora a estabilizar). A picagem já fica bloqueada; o aviso vermelho só aparece se persistir.
+            badSince ||= now
+            if (now - badSince < BAD_SHOW_MS) {
+              show({ kind: 'idle', text: t('kiosk.recognizing') })
+              return requestAnimationFrame(loop)
+            }
+            if (now - lastReject > 2000) bumpStat(r.status === 'spoof' ? 'spoofRejected' : 'unknown')
+            lastReject = now
+            show({ kind: 'bad', text: t(r.status === 'spoof' ? 'kiosk.spoof' : 'kiosk.unknown') })
             return requestAnimationFrame(loop)
           }
 
           // r.status === 'match': média dos fotogramas coincide com um trabalhador, de forma estável
           const { worker, similarity } = r
-          const confident = s.fastLiveness && r.real >= FAST_REAL && r.live >= FAST_REAL // modo rápido: o modelo já tem a certeza
-          const alive = !s.liveness || r.blink || r.turn || confident
           if (!alive) {
             show({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
             return requestAnimationFrame(loop)
@@ -176,6 +186,9 @@ function Scan({ settings, direction, setPending, onDone }) {
             sageId: worker.id,
             workerName: worker.name,
             confidence: similarity,
+            second: r.hasSecond ? r.second : null, // o 2º mais parecido e os valores do anti-foto: só para afinar o sistema
+            real: r.real,
+            live: r.live,
           })
           bumpStat('punches', ms)
           show({

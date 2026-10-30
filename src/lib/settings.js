@@ -6,7 +6,6 @@ const KEY = 'timp-ponto-settings'
 export const ENGINE = 'faceres'
 
 const DEFAULTS = {
-  detectorRotation: true, // alinha o rosto inclinado antes de o analisar (reconhece com a cabeça inclinada; um pouco mais lento)
   detectorConfidence: 0.4, // confiança mínima da deteção do rosto (mais baixa = deteta melhor com capacete/óculos)
   backend: 'webgl', // aceleração gráfica: 'webgl' | 'webgpu' (experimental; cai para webgl se o aparelho não suportar)
   obra: '', // obra onde está o tablet; vai em todas as picagens

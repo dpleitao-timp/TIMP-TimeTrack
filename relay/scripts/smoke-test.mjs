@@ -148,5 +148,19 @@ r = await signed('GET', '/pull-deletions')
 check('depois do ack não há pedidos', (await r.json()).deletions.length === 0)
 await signed('POST', '/ack', JSON.stringify({ eventIds: [d2] })) // limpeza
 
+// 8. dados de reconhecimento (2º mais parecido, anti-foto): chegam ao Supabase; inválidos viram null e não rejeitam
+const r1 = `${DEVICE}-${String(base + 200).padStart(6, '0')}`
+const r2 = `${DEVICE}-${String(base + 201).padStart(6, '0')}`
+r = await post({ deviceId: DEVICE, punches: [punch(base + 200, { second: 0.42, real: 0.7, live: 0.8 }), punch(base + 201, { second: 7, real: 'x', live: -1 })] })
+j = await r.json()
+check('picagem com dados de reconhecimento é aceite (inválidos não a rejeitam)', r.status === 200 && j.accepted.length === 2 && j.rejected.length === 0, JSON.stringify(j))
+r = await signed('GET', '/pull?limit=50')
+j = await r.json()
+const g1 = j.punches.find((p) => p.eventId === r1)
+const g2 = j.punches.find((p) => p.eventId === r2)
+check('o Supabase recebe second/real/live', g1?.second === 0.42 && g1?.real === 0.7 && g1?.live === 0.8, JSON.stringify(g1))
+check('valores fora de 0..1 ou não numéricos chegam como null', g2 && g2.second === null && g2.real === null && g2.live === null, JSON.stringify(g2))
+await signed('POST', '/ack', JSON.stringify({ eventIds: [r1, r2] })) // limpeza
+
 console.log(failed ?`\n${failed} teste(s) falharam` : '\nTudo OK')
 process.exit(failed ? 1 : 0)

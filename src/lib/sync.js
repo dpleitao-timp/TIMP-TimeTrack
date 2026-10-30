@@ -34,6 +34,9 @@ export async function flushQueue(settings) {
               direction: p.direction,
               punchedAt: p.punchedAt,
               confidence: p.confidence,
+              second: p.second ?? null,
+              real: p.real ?? null,
+              live: p.live ?? null,
             })),
           }),
         })

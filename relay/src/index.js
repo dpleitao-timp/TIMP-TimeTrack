@@ -61,6 +61,9 @@ async function readBody(request) {
   return text.length > MAX_BODY_BYTES ? null : text
 }
 
+// número entre 0 e 1, ou null
+const unit = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : null)
+
 // ------------------------------------------------------------------ tablet → relay
 async function handlePunch(request, env) {
   const cors = corsHeaders(env)
@@ -119,6 +122,10 @@ async function handlePunch(request, env) {
       direction: p.direction,
       punchedAt: new Date(t).toISOString(),
       confidence: typeof p.confidence === 'number' ? p.confidence : null,
+      // dados para afinar o reconhecimento; se vierem inválidos ficam a null (não rejeitam a picagem)
+      second: unit(p.second),
+      real: unit(p.real),
+      live: unit(p.live),
     })
     stmts.push(
       env.DB.prepare('INSERT OR IGNORE INTO outbox (event_id, device_id, payload, received_at) VALUES (?, ?, ?, ?)').bind(

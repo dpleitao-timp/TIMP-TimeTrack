@@ -41,7 +41,7 @@ export default defineConfig({
         short_name: 'Ponto',
         description: 'Picagem por reconhecimento facial (mockup)',
         display: 'fullscreen',
-        orientation: 'landscape',
+        orientation: 'any', // acompanha o aparelho: tablet fixo (deitado ou em pé) e telemóvel em pé
         background_color: '#f4f5f7',
         theme_color: '#7e0406',
         icons: [

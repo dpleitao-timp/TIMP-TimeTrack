@@ -122,5 +122,31 @@ check('novo envio apaga quem saiu da lista e atualiza nomes', j.workers.length =
 r = await signed('POST', '/roster', JSON.stringify({ gen: gen + 2, final: true, workers: [] }))
 check('lista vazia limpa tudo', ((await (await getRoster('&obra=OBRA-TESTE')).json()).workers || []).length === 0)
 
-console.log(failed ? `\n${failed} teste(s) falharam` : '\nTudo OK')
+// 7. apagar picagens: o tablet pede, o Supabase lê o pedido e confirma
+const del = (body, token = TOKEN) =>
+  fetch(`${RELAY}/punch/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-device-token': token }, body: JSON.stringify(body) })
+const d1 = `${DEVICE}-${String(base + 100).padStart(6, '0')}`
+const d2 = `${DEVICE}-${String(base + 101).padStart(6, '0')}`
+await post({ deviceId: DEVICE, punches: [punch(base + 100), punch(base + 101)] })
+r = await del({ deviceId: DEVICE, eventIds: [d1, `outro-${base}`] }, 'token-errado')
+check('apagar com token errado → 401', r.status === 401)
+r = await del({ deviceId: DEVICE, eventIds: [d1, `outro-${base}`] })
+j = await r.json()
+check('só aceita apagar picagens do próprio dispositivo', r.status === 200 && j.accepted.length === 1 && j.accepted[0] === d1, JSON.stringify(j))
+r = await signed('GET', '/pull?limit=50')
+j = await r.json()
+const left = (j.punches || []).map((p) => p.eventId)
+check('a picagem apagada sai do relay se ainda lá estava', !left.includes(d1) && left.includes(d2), JSON.stringify(left))
+r = await fetch(`${RELAY}/pull-deletions`, { headers: { 'x-device-token': TOKEN } })
+check('token do tablet não serve para /pull-deletions → 401', r.status === 401)
+r = await signed('GET', '/pull-deletions')
+j = await r.json()
+check('Supabase lê o pedido de apagar', r.status === 200 && j.deletions.some((x) => x.eventId === d1 && x.deviceId === DEVICE), JSON.stringify(j))
+r = await signed('POST', '/ack-deletions', JSON.stringify({ eventIds: j.deletions.map((x) => x.eventId) }))
+check('POST /ack-deletions confirma', r.status === 200)
+r = await signed('GET', '/pull-deletions')
+check('depois do ack não há pedidos', (await r.json()).deletions.length === 0)
+await signed('POST', '/ack', JSON.stringify({ eventIds: [d2] })) // limpeza
+
+console.log(failed ?`\n${failed} teste(s) falharam` : '\nTudo OK')
 process.exit(failed ? 1 : 0)

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
-import { listQueue, deletePendingPunch } from '../lib/db.js'
-import { loadStats, resetStats } from '../lib/settings.js'
+import { listQueue, deletePunch } from '../lib/db.js'
+import { loadStats, resetStats, loadSettings } from '../lib/settings.js'
+import { flushQueue } from '../lib/sync.js'
 import { useT } from '../lib/i18n.jsx'
 import { fmtDateTime, localIso } from '../lib/date.js'
 import DateField from './DateField.jsx'
@@ -15,6 +16,7 @@ export default function Punches() {
   const [rows, setRows] = useState([])
   const [stats, setStats] = useState(loadStats())
   const [msg, setMsg] = useState('')
+  const [info, setInfo] = useState('')
 
   const load = useCallback(async () => {
     setStats(loadStats())
@@ -30,13 +32,18 @@ export default function Punches() {
 
   async function remove(p) {
     const who = p.workerName || p.sageId
-    if (!confirm(t('punches.confirmDelete', { name: who, time: fmtDateTime(p.punchedAt) }))) return
+    if (!confirm(t(p.synced ? 'punches.confirmDeleteSent' : 'punches.confirmDelete', { name: who, time: fmtDateTime(p.punchedAt) }))) return
     setMsg('')
     try {
-      await deletePendingPunch(p.eventId)
+      await deletePunch(p.eventId)
       // o trabalhador pode voltar a picar já: sem a picagem na fila, deixa de haver intervalo a respeitar
+      if (p.synced) {
+        setInfo(t('punches.voidQueued'))
+        flushQueue(loadSettings()).then(load) // o pedido de apagar segue já para o relay
+      } else setInfo('')
     } catch (e) {
-      setMsg(e.code === 'ALREADY_SENT' ? t('punches.alreadySent') : String(e.message || e))
+      setInfo('')
+      setMsg(e.code === 'SENDING' ? t('punches.busy') : String(e.message || e))
     }
     load()
   }
@@ -59,6 +66,7 @@ export default function Punches() {
       </div>
 
       {msg && <p className="notice notice-warn">{msg}</p>}
+      {info && <p className="notice notice-ok">{info}</p>}
 
       <h3>{t('punches.daySummary')}</h3>
       {!Object.keys(summary).length && <p className="empty-text">{t('punches.noneDay')}</p>}
@@ -98,7 +106,7 @@ export default function Punches() {
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
                 <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : `⏳ (${p.attempts})`}</td>
-                <td>{p.synced ? <span className="muted" title={t('punches.alreadySent')}>🔒</span> : <button className="link-button" onClick={() => remove(p)}>{t('punches.delete')}</button>}</td>
+                <td><button className="link-button" onClick={() => remove(p)}>{t('punches.delete')}</button></td>
               </tr>
             ))}
             {!rows.length && <tr><td colSpan="9" className="muted">{t('punches.none')}</td></tr>}

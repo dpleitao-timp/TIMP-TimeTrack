@@ -49,6 +49,7 @@ Deno.serve(async (req) => {
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   let stored = 0
   let dropped = 0
+  let removed = 0
 
   try {
     for (let i = 0; i < MAX_BATCHES; i++) {
@@ -106,11 +107,26 @@ Deno.serve(async (req) => {
       await signedFetch('/ack', 'POST', JSON.stringify({ eventIds: ackIds }))
       if (punches.length < BATCH) break
     }
+    // Pedidos de apagar (o Administrador apagou no tablet uma picagem já enviada). Depois das picagens, para que uma
+    // picagem que ainda estivesse no relay seja gravada primeiro e apagada a seguir.
+    const { deletions } = await signedFetch(`/pull-deletions`, 'GET')
+    if (deletions?.length) {
+      const items = deletions
+        .filter((d: { eventId?: unknown; deviceId?: unknown }) => typeof d?.eventId === 'string' && typeof d?.deviceId === 'string')
+        .map((d: { eventId: string; deviceId: string }) => ({ event_id: d.eventId, device_id: d.deviceId }))
+      if (items.length) {
+        const { data, error } = await supabase.rpc('timetrack_apply_deletions', { p_items: items })
+        if (error) throw new Error(`deletions: ${error.message}`)
+        removed = data?.deleted ?? 0
+      }
+      // só se confirma depois de aplicado (inválidos também, para saírem do relay)
+      await signedFetch('/ack-deletions', 'POST', JSON.stringify({ eventIds: deletions.map((d: { eventId: string }) => d.eventId) }))
+    }
   } catch (e) {
     console.error(e)
     // a mensagem (p. ex. "relay GET /pull -> HTTP 403") não tem segredos e ajuda a diagnosticar via net._http_response
-    return new Response(JSON.stringify({ error: 'pull_failed', detail: String((e as Error)?.message ?? e).slice(0, 300), stored, dropped }), { status: 502 })
+    return new Response(JSON.stringify({ error: 'pull_failed', detail: String((e as Error)?.message ?? e).slice(0, 300), stored, dropped, removed }), { status: 502 })
   }
 
-  return new Response(JSON.stringify({ stored, dropped }), { headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify({ stored, dropped, removed }), { headers: { 'Content-Type': 'application/json' } })
 })

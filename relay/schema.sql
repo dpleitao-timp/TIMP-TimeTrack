@@ -18,6 +18,14 @@ CREATE TABLE IF NOT EXISTS outbox (
 
 CREATE INDEX IF NOT EXISTS outbox_device_idx ON outbox (device_id);
 
+-- Pedidos do tablet para apagar picagens já enviadas. O Supabase lê-os, apaga-as e confirma (o relay apaga o pedido).
+CREATE TABLE IF NOT EXISTS deletions (
+  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id    TEXT NOT NULL UNIQUE,
+  device_id   TEXT NOT NULL,
+  received_at INTEGER NOT NULL
+);
+
 -- Lista de trabalhadores por obra (enviada pelo Supabase, lida pelos tablets). Só SAGE ID e nome.
 CREATE TABLE IF NOT EXISTS roster (
   sage_id TEXT NOT NULL,

@@ -1,4 +1,4 @@
-import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, replaceRoster, touchRoster, rosterMeta } from './db.js'
+import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta } from './db.js'
 import { isCloudConfigured } from './settings.js'
 
 const BATCH = 50
@@ -56,11 +56,33 @@ export async function flushQueue(settings) {
         clearSending(ids)
       }
     }
+    await flushVoids(settings)
     await pruneSynced()
   } finally {
     running = false
   }
   return { sent, pending: (await pendingPunches()).length }
+}
+
+// Pedidos para apagar picagens que já tinham sido enviadas. Vão ao relay; o Supabase lê-os de lá e apaga a picagem.
+// Se falhar, a picagem continua marcada como apagada e tenta-se no ciclo seguinte.
+async function flushVoids(settings) {
+  const voids = await pendingVoids()
+  for (let i = 0; i < voids.length; i += BATCH) {
+    const ids = voids.slice(i, i + BATCH).map((p) => p.eventId)
+    try {
+      const res = await fetch(`${settings.relayUrl.replace(/\/$/, '')}/punch/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-device-token': settings.deviceToken },
+        body: JSON.stringify({ deviceId: settings.deviceId, eventIds: ids }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const body = await res.json()
+      await clearVoids(body.accepted ?? ids)
+    } catch {
+      return
+    }
+  }
 }
 
 // Lista de trabalhadores da obra, lida do relay (o Supabase publica-a lá). O tablet nunca fala com o Supabase.

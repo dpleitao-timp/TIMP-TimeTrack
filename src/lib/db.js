@@ -183,8 +183,10 @@ const sending = new Set()
 export const markSending = (ids) => ids.forEach((id) => sending.add(id))
 export const clearSending = (ids) => ids.forEach((id) => sending.delete(id))
 
-// Só se apaga uma picagem antes de ser enviada. Depois de enviada (ou a ser enviada) já não.
-export async function deletePendingPunch(eventId) {
+// Apaga uma picagem. Se ainda não foi enviada, desaparece sem mais. Se já foi enviada, fica marcada como apagada
+// (`voided`) e deixa de aparecer; o pedido para o Supabase a apagar segue pelo relay (ver `flushQueue`) e só então
+// o registo local é removido. A que está a ser enviada neste momento não se apaga (podia chegar ao relay a meio).
+export async function deletePunch(eventId) {
   const d = await db()
   const tx = d.transaction('queue', 'readwrite')
   const row = await tx.store.get(eventId)
@@ -192,13 +194,31 @@ export async function deletePendingPunch(eventId) {
     await tx.done
     return null
   }
-  if (row.synced || sending.has(eventId)) {
+  if (sending.has(eventId)) {
     await tx.done
-    throw Object.assign(new Error('A picagem já foi enviada.'), { code: 'ALREADY_SENT' })
+    throw Object.assign(new Error('A picagem está a ser enviada.'), { code: 'SENDING' })
   }
-  await tx.store.delete(eventId)
+  if (row.synced) await tx.store.put({ ...row, voided: true })
+  else await tx.store.delete(eventId)
   await tx.done
   return row
+}
+
+// Picagens já enviadas que foram apagadas aqui e cujo pedido de apagar ainda não chegou ao relay.
+export async function pendingVoids() {
+  const d = await db()
+  return (await d.getAll('queue')).filter((p) => p.voided)
+}
+
+// O relay aceitou o pedido de apagar: já não é preciso guardar a picagem no tablet.
+export async function clearVoids(eventIds) {
+  const d = await db()
+  const tx = d.transaction('queue', 'readwrite')
+  for (const id of eventIds) {
+    const row = await tx.store.get(id)
+    if (row?.voided) await tx.store.delete(id)
+  }
+  await tx.done
 }
 
 // Milissegundos desde a última picagem deste trabalhador neste tablet (Infinity se não houver).
@@ -214,7 +234,7 @@ export async function msSinceLastPunch(sageId) {
 
 export async function listQueue() {
   const d = await db()
-  const all = await d.getAll('queue')
+  const all = (await d.getAll('queue')).filter((p) => !p.voided) // as apagadas já não contam (nem para o intervalo mínimo)
   return all.sort((a, b) => b.punchedAt.localeCompare(a.punchedAt))
 }
 
@@ -260,7 +280,7 @@ export async function pruneSynced(days = 7) {
   const limit = new Date(Date.now() - days * 864e5).toISOString()
   const tx = d.transaction('queue', 'readwrite')
   for (const row of await tx.store.getAll()) {
-    if (row.synced && row.punchedAt < limit) await tx.store.delete(row.eventId)
+    if (row.synced && !row.voided && row.punchedAt < limit) await tx.store.delete(row.eventId) // as apagadas ficam até o pedido chegar ao relay
   }
   await tx.done
 }

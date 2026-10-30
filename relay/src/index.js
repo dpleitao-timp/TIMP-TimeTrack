@@ -2,8 +2,9 @@
 //
 //   Tablet  ── POST /punch ──►  [outbox]  ◄── GET /pull, POST /ack ──  Supabase
 //   Tablet  ◄── GET /roster ──  [roster]  ◄── POST /roster ──  Supabase
+//   Tablet  ── POST /punch/delete ──►  [deletions]  ◄── GET /pull-deletions, POST /ack-deletions ──  Supabase
 //
-// O tablet escreve picagens e lê a lista de trabalhadores (token do dispositivo). O Supabase lê as picagens,
+// O tablet escreve picagens (e pedidos para as apagar) e lê a lista de trabalhadores (token do dispositivo). O Supabase lê as picagens,
 // confirma-as e publica a lista (pedidos assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
 
 const MAX_BATCH = 200
@@ -164,6 +165,68 @@ async function handleAck(request, url, env) {
   return json({ deleted: ids.length })
 }
 
+// ------------------------------------------------------------------ tablet → relay: apagar picagens
+// Corpo: { deviceId, eventIds: [...] }. O tablet só pode apagar picagens do próprio dispositivo (o eventId começa pelo
+// ID do dispositivo). Se a picagem ainda está no relay à espera do Supabase, sai de lá; o pedido fica sempre registado
+// para o Supabase apagar a que já tenha gravado (ele processa as picagens antes dos pedidos de apagar).
+async function handleDelete(request, env) {
+  const cors = corsHeaders(env)
+  const token = request.headers.get('x-device-token')
+  if (!token) return json({ error: 'missing_token' }, 401, cors)
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413, cors)
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return json({ error: 'invalid_json' }, 400, cors)
+  }
+  const deviceId = String(body?.deviceId ?? '')
+  const ids = body?.eventIds
+  if (!deviceId || !Array.isArray(ids) || !ids.length || ids.length > MAX_BATCH) return json({ error: 'invalid_payload' }, 400, cors)
+
+  const device = await env.DB.prepare('SELECT token_hash, active FROM devices WHERE id = ?').bind(deviceId).first()
+  if (!device || !device.active || !timingSafeEqualHex(device.token_hash, await sha256Hex(token))) {
+    return json({ error: 'invalid_device' }, 401, cors)
+  }
+  const valid = ids.filter((i) => typeof i === 'string' && i.length <= 64 && i.startsWith(`${deviceId}-`))
+  const now = Math.floor(Date.now() / 1000)
+  const stmts = []
+  for (const id of valid) {
+    stmts.push(env.DB.prepare('INSERT OR IGNORE INTO deletions (event_id, device_id, received_at) VALUES (?, ?, ?)').bind(id, deviceId, now))
+    stmts.push(env.DB.prepare('DELETE FROM outbox WHERE event_id = ?').bind(id))
+  }
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ accepted: valid }, 200, cors)
+}
+
+// ------------------------------------------------------------------ Supabase → relay: pedidos de apagar
+async function handlePullDeletions(request, url, env) {
+  if (!(await verifySignature(request, url, '', env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  const { results } = await env.DB.prepare('SELECT event_id, device_id FROM deletions ORDER BY seq LIMIT ?').bind(MAX_PULL).all()
+  return json({ deletions: results.map((r) => ({ eventId: r.event_id, deviceId: r.device_id })) })
+}
+
+async function handleAckDeletions(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let ids
+  try {
+    ids = JSON.parse(text)?.eventIds
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  if (!Array.isArray(ids) || ids.length > MAX_ACK || ids.some((i) => typeof i !== 'string')) return json({ error: 'invalid_payload' }, 400)
+  const stmts = []
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50)
+    stmts.push(env.DB.prepare(`DELETE FROM deletions WHERE event_id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk))
+  }
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ deleted: ids.length })
+}
+
 // ------------------------------------------------------------------ Supabase → relay: lista de trabalhadores
 // Corpo: { gen, final, workers: [{ sageId, name, obra, active }] }. O Supabase envia a lista em blocos com o mesmo `gen`;
 // no último bloco (`final`) apagam-se os registos de envios anteriores (quem saiu da lista desaparece).
@@ -229,7 +292,10 @@ async function handleRosterGet(request, url, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (request.method === 'OPTIONS' && (url.pathname === '/punch' || url.pathname === '/roster')) return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'OPTIONS' && (url.pathname === '/punch' || url.pathname === '/punch/delete' || url.pathname === '/roster')) return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'POST' && url.pathname === '/punch/delete') return handleDelete(request, env)
+    if (request.method === 'GET' && url.pathname === '/pull-deletions') return handlePullDeletions(request, url, env)
+    if (request.method === 'POST' && url.pathname === '/ack-deletions') return handleAckDeletions(request, url, env)
     if (request.method === 'POST' && url.pathname === '/roster') return handleRosterPost(request, url, env)
     if (request.method === 'GET' && url.pathname === '/roster') return handleRosterGet(request, url, env)
     if (request.method === 'POST' && url.pathname === '/punch') return handlePunch(request, env)

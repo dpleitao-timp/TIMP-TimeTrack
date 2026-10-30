@@ -6,7 +6,7 @@ import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch } from '../
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
-import { diagStart, diagPush } from '../lib/diag.js'
+import { diagStart, diagPush, videoInfo } from '../lib/diag.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
 
@@ -132,7 +132,7 @@ function Scan({ settings, direction, setPending, onDone }) {
           if (stop) return
           const r = recognizer.push(face, gestures)
           setDebug(s.debug ? { ...r, detMs } : null)
-          if (s.debug) diagPush({ detMs, why, face: raw, r, trace: recognizer.trace() })
+          if (s.debug) diagPush({ detMs, why, face: raw, r, trace: recognizer.trace(), video: videoInfo(videoRef.current) })
           if (r.status === 'hold') return requestAnimationFrame(loop) // falha momentânea do detetor: não mexe no ecrã
           if (r.status === 'none') {
             setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))

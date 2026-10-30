@@ -13,7 +13,7 @@ export function diagStart() {
 }
 
 // why: 'ok' | 'noface' | 'noembedding' (rosto sem vetor, também conta como "sem rosto" para o reconhecedor)
-export function diagPush({ detMs, why, face, r, trace }) {
+export function diagPush({ detMs, why, face, r, trace, video }) {
   if (!t0) t0 = performance.now()
   rows.push(
     [
@@ -26,9 +26,30 @@ export function diagPush({ detMs, why, face, r, trace }) {
       `sim ${f(r.similarity)} 2º ${f(r.second)}`,
       `real ${f(r.real)} live ${f(r.live)}`,
       `olho ${f(trace?.open)} piscou ${yn(trace?.blink)} virou ${yn(trace?.turn)}`,
+      `vídeo ${video?.w}x${video?.h} estado ${video?.rs} luz ${video?.lum}`,
     ].join(' | '),
   )
   if (rows.length > MAX) rows.shift()
+}
+
+// Estado do vídeo e luminosidade média (0-255): ajuda a ver se a imagem estava escura/estourada ou o vídeo ainda não corria.
+let probe
+export function videoInfo(v) {
+  if (!v) return { w: 0, h: 0, rs: -1, lum: '-' }
+  let lum = '-'
+  try {
+    probe ??= document.createElement('canvas')
+    probe.width = probe.height = 16
+    const c = probe.getContext('2d', { willReadFrequently: true })
+    c.drawImage(v, 0, 0, 16, 16)
+    const d = c.getImageData(0, 0, 16, 16).data
+    let sum = 0
+    for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+    lum = Math.round(sum / (d.length / 4))
+  } catch {
+    /* vídeo sem imagem ainda */
+  }
+  return { w: v.videoWidth, h: v.videoHeight, rs: v.readyState, lum }
 }
 
 export const diagCount = () => rows.length

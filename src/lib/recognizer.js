@@ -5,7 +5,8 @@ import { rankMatches, meanEmbedding, livenessSignals } from './face.js'
 //  - o anti-foto (real/live do modelo) também é a média da janela, não um fotograma isolado;
 //  - recusa se houver outro trabalhador quase tão parecido (margem), em vez de arriscar um engano;
 //  - a identidade tem de se manter em `stableFrames` avaliações seguidas;
-//  - piscar/virar a cabeça acumula enquanto o rosto estiver à frente da câmara.
+//  - piscar/virar a cabeça acumula enquanto o rosto estiver à frente da câmara;
+//  - se o detetor falhar por instantes (GRACE_MS), nada disto se perde: só se recomeça se o rosto desaparecer mesmo.
 //
 // Estados devolvidos por push(): none | collecting | spoof | unknown | confirming | match
 const MARGIN = 0.04 // diferença mínima entre o melhor e o segundo melhor trabalhador
@@ -15,6 +16,7 @@ const STRONG_MARGIN = 0.1 // folga sobre o segundo melhor para decidir cedo
 const BLINK_DROP = 0.65 // piscar: abertura do olho cai abaixo de 65% do máximo recente
 const HEAD_MOVE = 0.22 // amplitude (rad, ~12°) de rotação da cabeça que conta como movimento
 const MIN_OPEN = 0.15 // abaixo disto o olho já estava quase fechado: não serve de referência
+const GRACE_MS = 800 // rosto não detetado durante menos do que isto: mantém a janela, o piscar e a identidade
 
 // Abertura média dos dois olhos, a partir da malha facial (mesmos pontos que o Human usa para o piscar).
 export function eyeOpenness(mesh) {
@@ -35,8 +37,11 @@ export function createRecognizer(getSettings, workers) {
   let yaws = [] // histórico recente da rotação da cabeça
   let pitches = []
   let start = 0
+  let lostAt = 0 // instante em que o rosto deixou de ser detetado (0 = está a ser detetado)
+  let trace = null // o que se viu no último fotograma (só para o diagnóstico)
 
   const reset = () => {
+    lostAt = 0
     buffer = []
     track = null
     signals = { blink: false, turn: false }
@@ -48,11 +53,19 @@ export function createRecognizer(getSettings, workers) {
 
   function push(face, gestures) {
     const s = getSettings()
+    const now = performance.now()
     if (!face) {
+      trace = { buf: buffer.length }
+      // O detetor falha de vez em quando (e ao piscar, com os olhos fechados, é frequente). Perder um ou dois fotogramas
+      // não pode apagar o que já se juntou: só se recomeça se o rosto desaparecer mesmo (GRACE_MS seguidos).
+      if (!buffer.length) return { status: 'none' }
+      if (!lostAt) lostAt = now
+      if (now - lostAt < GRACE_MS) return { status: 'hold' }
       reset()
       return { status: 'none' }
     }
-    if (!buffer.length) start = performance.now()
+    lostAt = 0
+    if (!buffer.length) start = now
     buffer.push({ e: Array.from(face.embedding), real: face.real, live: face.live })
     const n = Math.max(1, Number(s.avgFrames) || 5)
     const minFrames = Math.min(n, MIN_FRAMES)
@@ -84,6 +97,7 @@ export function createRecognizer(getSettings, workers) {
       moved = yaws.length >= 4 && (range(yaws) >= HEAD_MOVE || range(pitches) >= HEAD_MOVE)
     }
     signals = { blink: signals.blink || sig.blink || relBlink, turn: signals.turn || sig.turn || moved }
+    trace = { open, blink: signals.blink, turn: signals.turn, buf: buffer.length }
 
     if (buffer.length < minFrames) return { status: 'collecting', frames: buffer.length, of: n }
     const early = buffer.length < n // janela ainda incompleta: só decide se a correspondência for muito forte
@@ -111,10 +125,17 @@ export function createRecognizer(getSettings, workers) {
       return { status: 'unknown', ...info }
     }
 
+    if (track && track.id !== best.worker.id) {
+      // outra pessoa: o piscar e o movimento de quem estava antes não valem para esta
+      signals = { blink: false, turn: false }
+      eyes = []
+      yaws = []
+      pitches = []
+    }
     track = track?.id === best.worker.id ? { id: track.id, count: track.count + 1 } : { id: best.worker.id, count: 1 }
     const out = { worker: best.worker, similarity: best.similarity, ...signals, ...info }
     return { status: track.count >= s.stableFrames ? 'match' : 'confirming', ...out }
   }
 
-  return { push, reset }
+  return { push, reset, trace: () => trace }
 }

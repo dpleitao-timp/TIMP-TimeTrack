@@ -6,6 +6,7 @@ import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch } from '../
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
+import { diagStart, diagPush } from '../lib/diag.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
 
@@ -114,6 +115,7 @@ function Scan({ settings, direction, setPending, onDone }) {
       setLoading('')
       workers = await listWorkers()
       recognizer = createRecognizer(() => settingsRef.current, workers)
+      diagStart() // um registo novo por cada leitura (o último fica disponível nas Definições)
       if (!workers.some((w) => !w.stale && !w.broken)) show({ kind: 'warn', text: workers.length ? t('kiosk.staleWorkers') : t('kiosk.noWorkers') })
 
       const loop = async () => {
@@ -123,11 +125,13 @@ function Scan({ settings, direction, setPending, onDone }) {
         if (performance.now() < pauseUntil) return requestAnimationFrame(loop)
         try {
           const t0 = performance.now()
-          const { face, gestures } = await detect(videoRef.current)
+          const { face, gestures, why, raw } = await detect(videoRef.current)
           const detMs = Math.round(performance.now() - t0)
           if (stop) return
           const r = recognizer.push(face, gestures)
           setDebug(s.debug ? { ...r, detMs } : null)
+          if (s.debug) diagPush({ detMs, why, face: raw, r, trace: recognizer.trace() })
+          if (r.status === 'hold') return requestAnimationFrame(loop) // falha momentânea do detetor: não mexe no ecrã
           if (r.status === 'none') {
             setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))
             return requestAnimationFrame(loop)

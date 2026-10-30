@@ -35,6 +35,7 @@ function buildConfig() {
   const cfg = structuredClone(baseConfig)
   cfg.backend = s.backend === 'webgpu' ? 'webgpu' : 'webgl'
   cfg.face.detector.minConfidence = Number(s.detectorConfidence) || 0.4
+  cfg.face.detector.rotation = s.detectorRotation !== false // o Human ignora-o se o backend não suportar (p. ex. WebGPU)
   return cfg
 }
 
@@ -60,12 +61,14 @@ export function initHuman(onStatus) {
 export const getHuman = () => human
 export const backendName = () => human?.tf?.getBackend?.() ?? '-'
 
-// Devolve { face, gestures } do frame atual (ou null se não há rosto).
+// Devolve { face, gestures, why, raw } do frame atual (face null se não há rosto utilizável).
+// why: 'ok' | 'noface' | 'noembedding'; raw é o que o detetor viu (para o diagnóstico).
 export async function detect(video) {
   const res = await human.detect(video)
-  const face = res.face?.[0]
-  if (!face || !face.embedding?.length) return { face: null, gestures: [] }
-  return { face, gestures: (res.gesture || []).map((g) => g.gesture) }
+  const raw = res.face?.[0]
+  if (!raw) return { face: null, gestures: [], why: 'noface', raw: null }
+  if (!raw.embedding?.length) return { face: null, gestures: [], why: 'noembedding', raw }
+  return { face: raw, gestures: (res.gesture || []).map((g) => g.gesture), why: 'ok', raw }
 }
 
 // Semelhança 0..1 entre dois vetores (distância normalizada do Human para o descritor do FaceRes).

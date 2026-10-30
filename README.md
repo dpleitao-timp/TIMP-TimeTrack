@@ -83,6 +83,9 @@ O intervalo (Definições, em segundos) é calculado a partir das picagens guard
 
 ## Velocidade do reconhecimento
 - **Decisão antecipada:** com 3 fotogramas já decide se a correspondência for muito forte (limiar +0,15 e margem de 0,10 sobre o segundo); se não, espera pela janela completa de 5.
+- **Falhas momentâneas do detetor:** se o rosto deixar de ser detetado durante menos de 0,8 s (acontece muito ao piscar, com os olhos fechados), a janela de fotogramas, o piscar já feito e a identidade mantêm-se; só se recomeça se o rosto desaparecer mesmo. Se a identidade mudar a meio, o piscar e o movimento de quem estava antes deixam de valer.
+- **Rosto inclinado:** a rotação do detetor está ligada por omissão (Definições → Rosto inclinado): o Human alinha o rosto antes de o analisar, por isso reconhece com a cabeça inclinada. É um pouco mais lento e só tem efeito no backend WebGL (o Human ignora-a noutros). Os registos existentes continuam válidos; se a semelhança descer com a cabeça direita, desligue-a.
+- **Diagnóstico:** com "debug" ligado, o tablet guarda em memória os últimos 400 fotogramas da última leitura (tempo de deteção, se viu rosto, estado, semelhança, abertura do olho, piscar). Definições → "Copiar diagnóstico" copia-os como texto, para analisar a sequência real quando algo oscila. Nada sai do tablet.
 - **Piscar relativo:** além do limiar do Human, deteta quedas de 35% na abertura dos olhos (apanha pestanejos parciais que a taxa de fotogramas não apanha). Era a principal causa de ter de piscar várias vezes.
 - **Sem o modelo da íris** (não é usado: piscar e rotação saem da malha facial): menos dois modelos por fotograma.
 - **Menos renderizações** no ecrã de picar: o aviso só se atualiza quando muda.

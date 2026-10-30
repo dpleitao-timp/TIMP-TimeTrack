@@ -6,6 +6,7 @@ import { listCameras } from '../lib/cameras.js'
 import { listRoster, rosterMeta } from '../lib/db.js'
 import { syncRoster } from '../lib/sync.js'
 import { fmtDateTime } from '../lib/date.js'
+import { diagCount, diagText } from '../lib/diag.js'
 
 export default function Settings({ settings, onChange }) {
   const { t } = useT()
@@ -20,10 +21,21 @@ export default function Settings({ settings, onChange }) {
     loadRoster()
   }, [])
   const [camMsg, setCamMsg] = useState('')
+  const [diagText_, setDiagText] = useState(null) // null = não pedido; '' = sem registo
+  // Copia o registo de diagnóstico (e mostra-o, caso o navegador não deixe copiar)
+  async function copyDiag() {
+    const text = diagCount() ? diagText() : ''
+    setDiagText(text)
+    try {
+      if (text) await navigator.clipboard.writeText(text)
+    } catch {
+      /* sem permissão para copiar: o texto fica visível para copiar à mão */
+    }
+  }
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
-    const reload = s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
+    const reload = s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence) || Boolean(s.detectorRotation) !== Boolean(settings.detectorRotation)
     const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence) }
     onChange(next)
     setMsg(t('settings.saved'))
@@ -102,6 +114,15 @@ export default function Settings({ settings, onChange }) {
             <input type="range" min="0.2" max="0.8" step="0.05" value={s.detectorConfidence} onChange={set('detectorConfidence')} />
             <small>{t('settings.detectorConfidenceHint')}</small>
           </label>
+          <button type="button" className="switch-row" onClick={() => setS({ ...s, detectorRotation: !s.detectorRotation })}>
+            <span>
+              {t('settings.detectorRotation')}
+              <small>{t('settings.detectorRotationHint')}</small>
+            </span>
+            <span className={`switch ${s.detectorRotation ? 'on' : ''}`}>
+              <i />
+            </span>
+          </button>
           <label className="field">
             {t('settings.avgFrames')}
             <input className="field-input" type="number" min="1" max="10" value={s.avgFrames} onChange={set('avgFrames')} />
@@ -136,6 +157,17 @@ export default function Settings({ settings, onChange }) {
               <i />
             </span>
           </button>
+          <div className="field">
+            <button type="button" className="btn btn-secondary btn-small" onClick={copyDiag}>
+              {t('settings.diagCopy', { n: diagCount() })}
+            </button>
+            {diagText_ !== null && (
+              <>
+                <small>{diagText_ ? t('settings.diagShown') : t('settings.diagEmpty')}</small>
+                {diagText_ && <textarea className="field-input" readOnly rows={8} value={diagText_} onFocus={(e) => e.target.select()} style={{ fontFamily: 'monospace', fontSize: '0.75rem' }} />}
+              </>
+            )}
+          </div>
           <button type="button" className="switch-row" onClick={() => setS({ ...s, liveness: !s.liveness })}>
             <span>
               {t('settings.liveness')}

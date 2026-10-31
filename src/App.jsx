@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Kiosk from './views/Kiosk.jsx'
 import Enrol from './views/Enrol.jsx'
 import Punches from './views/Punches.jsx'
@@ -8,13 +8,43 @@ import { startAutoSync, syncRoster } from './lib/sync.js'
 import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
-import { warmCamera, releaseCamera } from './lib/useCamera.js'
+import { warmCamera, releaseCamera, acquireCamera } from './lib/useCamera.js'
 
 // Só o Administrador acede a estes separadores.
 const ADMIN_TABS = ['enrol', 'punches', 'settings']
 const ADMIN_IDLE_MS = 5 * 60 * 1000 // a sessão de administrador termina sem atividade
 
 const routeFromHash = () => (location.hash.replace('#/', '') || 'kiosk').split('?')[0]
+
+// Mantém a câmara ligada a um vídeo minúsculo e quase invisível o tempo todo. Assim, quando o ecrã de leitura mostra a
+// imagem, a câmara já estava a "ver" e não recomeça o ajuste de exposição (a imagem começava escura e demorava segundos).
+function CameraKeepAlive({ deviceId }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    let cancelled = false
+    const attach = async () => {
+      try {
+        const stream = await acquireCamera(deviceId)
+        const v = ref.current
+        if (cancelled || !v) return
+        if (v.srcObject !== stream) v.srcObject = stream
+        if (v.paused) await v.play()
+      } catch {
+        /* sem câmara ou sem permissão: o ecrã de leitura mostra o erro */
+      }
+    }
+    const t = setTimeout(attach, 400) // depois do arranque rápido (a câmara é aberta por warmCamera)
+    const onVisible = () => document.visibilityState === 'visible' && attach()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+      document.removeEventListener('visibilitychange', onVisible)
+      if (ref.current) ref.current.srcObject = null
+    }
+  }, [deviceId])
+  return <video ref={ref} className="camera-keepalive" muted playsInline aria-hidden="true" tabIndex={-1} />
+}
 
 export default function App() {
   const { t } = useT()
@@ -134,6 +164,7 @@ export default function App() {
 
   return (
     <>
+      <CameraKeepAlive deviceId={settings.cameraId} />
       <header className="app-header">
         <nav className="tabs">
           <a href="#/kiosk" className={current === 'kiosk' ? 'tab on' : 'tab'}>

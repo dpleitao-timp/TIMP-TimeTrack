@@ -1,3 +1,5 @@
+import { backendName } from './face.js'
+
 // Registo de diagnóstico do reconhecimento: os últimos fotogramas, um por linha, para se ver a sequência real
 // (o rosto some? o estado alterna? quanto demora cada deteção?). Só em memória e só com "debug" ligado; nada sai do tablet.
 const MAX = 400
@@ -26,6 +28,7 @@ export function diagPush({ detMs, why, face, r, trace, video }) {
       `sim ${f(r.similarity)} 2º ${f(r.second)}`,
       `real ${f(r.real)} live ${f(r.live)}`,
       `olho ${f(trace?.open)} piscou ${yn(trace?.blink)} virou ${yn(trace?.turn)}`,
+      `pose virar ${f(trace?.yaw)} acenar ${f(trace?.pitch)} inclinar ${f(trace?.roll)}`,
       `vídeo ${video?.w}x${video?.h} estado ${video?.rs} luz ${video?.lum}`,
     ].join(' | '),
   )
@@ -55,6 +58,6 @@ export function videoInfo(v) {
 export const diagCount = () => rows.length
 
 export function diagText() {
-  const head = `TIMP Time Clock · diagnóstico · ${new Date().toISOString()} · ${rows.length} fotogramas`
+  const head = `TIMP Time Clock · diagnóstico · ${new Date().toISOString()} · ${rows.length} fotogramas · backend ${backendName()}`
   return [head, ...rows].join('\n')
 }

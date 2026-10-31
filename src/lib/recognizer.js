@@ -72,6 +72,7 @@ export function createRecognizer(getSettings, workers) {
     while (buffer.length > n) buffer.shift()
 
     const sig = livenessSignals(gestures)
+    const ang = face.rotation?.angle // pose da cabeça (rad): virar, acenar e inclinar
     // piscar relativo: apanha pestanejos que a taxa de fotogramas não apanha por inteiro (o limiar fixo do Human
     // exige o olho quase fechado num fotograma, e um pestanejo dura ~150 ms)
     const open = eyeOpenness(face.mesh)
@@ -84,7 +85,6 @@ export function createRecognizer(getSettings, workers) {
     }
     // movimento da cabeça: com óculos de proteção o piscar pode não ser visível (reflexos, lentes escuras);
     // virar ou acenar ligeiramente a cabeça também prova que há alguém vivo
-    const ang = face.rotation?.angle
     let moved = false
     if (ang && Number.isFinite(ang.yaw) && Number.isFinite(ang.pitch)) {
       yaws.push(ang.yaw)
@@ -97,7 +97,7 @@ export function createRecognizer(getSettings, workers) {
       moved = yaws.length >= 4 && (range(yaws) >= HEAD_MOVE || range(pitches) >= HEAD_MOVE)
     }
     signals = { blink: signals.blink || sig.blink || relBlink, turn: signals.turn || sig.turn || moved }
-    trace = { open, blink: signals.blink, turn: signals.turn, buf: buffer.length }
+    trace = { open, blink: signals.blink, turn: signals.turn, buf: buffer.length, yaw: ang?.yaw, pitch: ang?.pitch, roll: ang?.roll }
 
     if (buffer.length < minFrames) return { status: 'collecting', frames: buffer.length, of: n }
     const early = buffer.length < n // janela ainda incompleta: só decide se a correspondência for muito forte

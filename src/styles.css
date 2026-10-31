@@ -287,7 +287,10 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 
 /* ---------------------------------------------------------------- quiosque */
 .kiosk-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 0 12px calc(env(safe-area-inset-bottom, 0px) + 10px); }
-.kiosk { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-lg); background: #000; box-shadow: var(--shadow); }
+/* Moldura branca: à noite o ecrã é a principal luz sobre o rosto, e um ecrã de leitura escuro deixava a imagem subexposta. */
+.kiosk { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-lg); border: clamp(12px, 3vw, 28px) solid #fff; background: #000; box-shadow: var(--shadow); }
+/* Vídeo sempre ligado à câmara (ver CameraKeepAlive em App.jsx): minúsculo e quase invisível, mas desenhado. */
+.camera-keepalive { position: fixed; right: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }
 .kiosk-dock { display: flex; align-items: center; justify-content: center; gap: 12px; flex-shrink: 0; }
 .choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 16px; text-align: center; }
 .choice-title { margin: 0; font-size: 2rem; }

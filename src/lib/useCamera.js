@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { loadSettings } from './settings.js'
+import { applyToTrack } from './cameraControls.js'
 
 // Câmara sempre ligada: uma única câmara é aberta quando a app arranca e fica aberta, partilhada pelos
 // ecrãs (Picar, Administração, Registar). Só é analisada depois de escolher Entrada/Saída; entretanto
@@ -40,6 +42,7 @@ export function acquireCamera(deviceId = '') {
         throw new Error('camera-changed')
       }
       shared.stream = stream
+      applyToTrack(stream.getVideoTracks()[0], loadSettings()) // exposição e taxa de imagens, se definidas
       // se a câmara parar (cabo, suspensão do aparelho), a próxima utilização volta a abri-la
       stream.getVideoTracks().forEach((t) => t.addEventListener('ended', () => shared.stream === stream && (shared = { stream: null, deviceId: '', promise: null })))
       return stream

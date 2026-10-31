@@ -14,6 +14,7 @@ import AdminLogin from './AdminLogin.jsx'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const FAST_REAL = 0.8 // confiança mínima do anti-foto para dispensar o piscar no modo rápido
+const SIDE_FACTOR = 2.5 // as laterais da moldura são tantas vezes mais largas do que o topo e a base
 const BAD_SHOW_MS = 1500 // "foto" / "não reconhecido" só aparecem se durarem isto sem interrupção
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
 
@@ -140,7 +141,15 @@ function Scan({ settings, direction, setPending, onDone }) {
       workers = await listWorkers()
       recognizer = createRecognizer(() => settingsRef.current, workers)
       diagStart() // um registo novo por cada leitura (o último fica disponível nas Definições)
-      light = createLightControl((v) => kioskRef.current?.style.setProperty('--light-frame', `${v}vmin`), settingsRef.current.lightFrameAuto !== false)
+      // topo e base seguem a espessura calculada; as laterais, que têm muito espaço num ecrã largo, ficam 2,5 vezes mais largas
+      // (só com a moldura adaptativa ligada). Mais área branca ao lado da cara, mais luz difusa.
+      const autoFrame = settingsRef.current.lightFrameAuto !== false
+      light = createLightControl((v) => {
+        const el = kioskRef.current
+        if (!el) return
+        el.style.setProperty('--light-frame', `${v}vmin`)
+        el.style.setProperty('--light-frame-x', `${autoFrame ? v * SIDE_FACTOR : v}vmin`)
+      }, autoFrame)
       if (!workers.some((w) => !w.stale && !w.broken)) show({ kind: 'warn', text: workers.length ? t('kiosk.staleWorkers') : t('kiosk.noWorkers') })
 
       const loop = async () => {

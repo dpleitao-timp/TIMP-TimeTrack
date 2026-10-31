@@ -291,6 +291,9 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 .kiosk { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-lg); background: #000; box-shadow: var(--shadow); --light-frame: 3vmin; }
 /* Moldura branca por cima do vídeo (não mexe no tamanho da imagem). A espessura é ajustada pela luz da cara (lightframe.js). */
 .kiosk::after { content: ''; position: absolute; inset: 0; z-index: 1; border: var(--light-frame) solid #fff; border-radius: inherit; pointer-events: none; transition: border-width 0.6s ease; }
+/* Laterais mais largas (a espessura vem de lightframe.js; no máximo 22% da largura de cada lado). Em ecrã vertical, igual em todos os lados. */
+.kiosk::after { border-width: var(--light-frame) min(var(--light-frame-x, var(--light-frame)), 22vw); }
+@media (orientation: portrait) { .kiosk::after { border-width: var(--light-frame); } }
 .kiosk .kiosk-top, .kiosk .banner, .kiosk .scan-clock, .kiosk .debug { z-index: 2; }
 /* Vídeo sempre ligado à câmara (ver CameraKeepAlive em App.jsx): minúsculo e quase invisível, mas desenhado. */
 .camera-keepalive { position: fixed; right: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }

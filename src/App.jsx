@@ -9,6 +9,8 @@ import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
 import { warmCamera, releaseCamera, acquireCamera } from './lib/useCamera.js'
+import { applyToTrack } from './lib/cameraControls.js'
+import { videoInfo } from './lib/diag.js'
 import { inHours, weekendOff, WAKE_MS } from './lib/schedule.js'
 
 // Só o Administrador acede a estes separadores.
@@ -67,6 +69,7 @@ export default function App() {
   const [hasAdmin, setHasAdmin] = useState(null) // null = a verificar
   const [admin, setAdmin] = useState(null) // sessão: { id, name }
   const [pending, setPending] = useState(0) // picagens por enviar
+  const [camReverted, setCamReverted] = useState(false) // a exposição manual foi desfeita por segurança
   const [asleep, setAsleep] = useState(false) // fora do horário de funcionamento e sem toque recente
   const wakeUntil = useRef(0) // até quando fica ativo depois de um toque fora do horário
   const sleepingNow = () => !inHours(loadSettings()) && Date.now() > wakeUntil.current
@@ -85,6 +88,39 @@ export default function App() {
       window.removeEventListener('pointerdown', extend)
     }
   }, [settings])
+
+  // Atalho de emergência sem rosto nem Administrador: abrir o endereço da app com ?camauto repõe a câmara em automático.
+  // Só desfaz a exposição manual (o valor seguro), por isso não abre nada a ninguém.
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('camauto')) return
+    const s = { ...loadSettings(), camExposure: 'auto', camFps: 0 }
+    saveSettings(s)
+    setSettings(s)
+    setCamReverted(true)
+    history.replaceState(null, '', location.pathname + location.hash)
+    acquireCamera(s.cameraId).then((stream) => applyToTrack(stream.getVideoTracks()[0], s)).catch(() => {})
+  }, [])
+
+  // Rede de segurança: com a exposição manual, se a imagem fica preta (cerca de 6 s) volta sozinha a automático.
+  // Sem isto, uma exposição que deixe a imagem preta impede de reconhecer o Administrador e de chegar às Definições.
+  useEffect(() => {
+    if (asleep || settings.camExposure !== 'manual') return
+    let dark = 0
+    const timer = setInterval(() => {
+      const v = document.querySelector('.camera-keepalive')
+      const lum = v ? videoInfo(v).lum : null
+      dark = typeof lum === 'number' && lum < 8 ? dark + 1 : 0
+      if (dark >= 3) {
+        clearInterval(timer)
+        const s = { ...loadSettings(), camExposure: 'auto' }
+        saveSettings(s)
+        setSettings(s)
+        setCamReverted(true)
+        acquireCamera(s.cameraId).then((stream) => applyToTrack(stream.getVideoTracks()[0], s)).catch(() => {})
+      }
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [asleep, settings.camExposure])
 
   const wake = () => {
     wakeUntil.current = Date.now() + WAKE_MS
@@ -222,6 +258,7 @@ export default function App() {
     }
     saveSettings(s)
     setSettings(s)
+    acquireCamera(s.cameraId).then((stream) => applyToTrack(stream.getVideoTracks()[0], s)).catch(() => {}) // exposição e taxa de imagens
   }
 
   const onRegistered = (worker) => {
@@ -261,6 +298,11 @@ export default function App() {
           {settings.deviceName} · {online ? t('kiosk.online') : t('kiosk.offline')} · {t('kiosk.pendingSend', { n: pending })}
         </span>
       </header>
+      {camReverted && (
+        <p className="notice notice-warn" style={{ margin: '0 16px 8px' }} onClick={() => setCamReverted(false)}>
+          {t('app.camReverted')}
+        </p>
+      )}
       {hasAdmin === false && !admin && (
         <p className="notice notice-warn" style={{ margin: '0 16px 8px' }}>
           {t('app.noAdmin')}

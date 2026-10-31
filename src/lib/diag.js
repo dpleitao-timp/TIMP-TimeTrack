@@ -152,7 +152,8 @@ function capabilitiesLine() {
   try {
     const c = camTrack?.getCapabilities?.()
     if (!c) return 'CÂMARA capacidades: o navegador não as indica'
-    const parts = CAP_KEYS.map((k) => {
+    const keys = [...CAP_KEYS, ...Object.keys(c).filter((k) => !CAP_KEYS.includes(k))]
+    const parts = keys.map((k) => {
       const v = c[k]
       if (v === undefined) return `${k}:não`
       if (Array.isArray(v)) return `${k}:[${v.join(',')}]`

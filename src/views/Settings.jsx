@@ -7,6 +7,8 @@ import { listRoster, rosterMeta } from '../lib/db.js'
 import { syncRoster } from '../lib/sync.js'
 import { fmtDateTime } from '../lib/date.js'
 import { diagCount, diagText } from '../lib/diag.js'
+import { acquireCamera } from '../lib/useCamera.js'
+import { readCapabilities } from '../lib/cameraControls.js'
 
 export default function Settings({ settings, onChange }) {
   const { t } = useT()
@@ -21,6 +23,16 @@ export default function Settings({ settings, onChange }) {
     loadRoster()
   }, [])
   const [camMsg, setCamMsg] = useState('')
+  const [camCaps, setCamCaps] = useState(undefined) // undefined = a ler; null = a câmara não o indica
+  useEffect(() => {
+    let alive = true
+    acquireCamera(settings.cameraId)
+      .then((stream) => alive && setCamCaps(readCapabilities(stream.getVideoTracks()[0])))
+      .catch(() => alive && setCamCaps(null))
+    return () => {
+      alive = false
+    }
+  }, [settings.cameraId])
   const [diagText_, setDiagText] = useState(null) // null = não pedido; '' = sem registo
   // Copia o registo de diagnóstico (e mostra-o, caso o navegador não deixe copiar)
   async function copyDiag() {
@@ -36,7 +48,7 @@ export default function Settings({ settings, onChange }) {
 
   async function save() {
     const reload = s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
-    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence) }
+    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), camExposureMs: Number(s.camExposureMs), camFps: Number(s.camFps) }
     onChange(next)
     setMsg(t('settings.saved'))
     if (next.obra.toLowerCase() !== (settings.obra || '').trim().toLowerCase()) {
@@ -200,6 +212,28 @@ export default function Settings({ settings, onChange }) {
               </label>
             </div>
             {toggle('fastLiveness', t('settings.fastLiveness'), t('settings.fastLivenessHint'))}
+            <label className="field">
+              {t('settings.camExposure')}
+              <select className="field-select" value={s.camExposure} onChange={set('camExposure')} disabled={!camCaps?.manual}>
+                <option value="auto">{t('settings.camAuto')}</option>
+                <option value="manual">{t('settings.camManual')}</option>
+              </select>
+              <small>{camCaps?.manual ? t('settings.camExposureHint') : camCaps === undefined ? '…' : t('settings.camExposureNone')}</small>
+            </label>
+            {s.camExposure === 'manual' && camCaps?.manual && (
+              <label className="field">
+                {t('settings.camExposureMs', { v: s.camExposureMs })}
+                <input type="range" min={camCaps.minMs} max={camCaps.maxMs} step="1" value={s.camExposureMs} onChange={set('camExposureMs')} />
+              </label>
+            )}
+            <label className="field">
+              {t('settings.camFps')}
+              <select className="field-select" value={String(s.camFps)} onChange={set('camFps')} disabled={!camCaps?.fps}>
+                <option value="0">{t('settings.camAuto')}</option>
+                <option value="15">15</option>
+                <option value="30">30</option>
+              </select>
+            </label>
           </details>
 
           <section className="card">

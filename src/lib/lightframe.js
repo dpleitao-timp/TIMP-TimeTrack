@@ -23,9 +23,9 @@ export function createLightControl(apply, auto = true) {
   apply(auto ? current : FRAME_DEFAULT)
   return {
     update(luma, now = performance.now()) {
-      if (!auto || luma == null || !Number.isFinite(luma)) return
-      ema = ema == null ? luma : ema * (1 - SMOOTH) + luma * SMOOTH
-      if (now - last < EVERY_MS) return
+      if (luma == null || !Number.isFinite(luma)) return
+      ema = ema == null ? luma : ema * (1 - SMOOTH) + luma * SMOOTH // mede sempre (o diagnóstico mostra-a mesmo com a moldura fixa)
+      if (!auto || now - last < EVERY_MS) return
       last = now
       let next = current
       if (ema < LOW) next = Math.min(FRAME_MAX, current + STEP)

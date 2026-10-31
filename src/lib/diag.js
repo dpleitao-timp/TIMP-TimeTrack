@@ -15,7 +15,7 @@ export function diagStart() {
 }
 
 // why: 'ok' | 'noface' | 'noembedding' (rosto sem vetor, também conta como "sem rosto" para o reconhecedor)
-export function diagPush({ detMs, why, face, r, trace, video }) {
+export function diagPush({ detMs, why, face, r, trace, video, light }) {
   if (!t0) t0 = performance.now()
   rows.push(
     [
@@ -30,6 +30,7 @@ export function diagPush({ detMs, why, face, r, trace, video }) {
       `olho ${f(trace?.open)} piscou ${yn(trace?.blink)} virou ${yn(trace?.turn)}`,
       `pose virar ${f(trace?.yaw)} acenar ${f(trace?.pitch)} inclinar ${f(trace?.roll)}`,
       `vídeo ${video?.w}x${video?.h} estado ${video?.rs} luz ${video?.lum}`,
+      `cara luz ${f(light?.luma, 0)} moldura ${f(light?.frame, 1)}vmin`,
     ].join(' | '),
   )
   if (rows.length > MAX) rows.shift()
@@ -53,6 +54,26 @@ export function videoInfo(v) {
     /* vídeo sem imagem ainda */
   }
   return { w: v.videoWidth, h: v.videoHeight, rs: v.readyState, lum }
+}
+
+// Luminosidade média (0-255) da zona central da cara (60% da caixa, sem cabelo nem fundo).
+let faceProbe
+export function faceLuma(v, box) {
+  if (!v || !box || box.length < 4 || !v.videoWidth) return null
+  try {
+    const [x, y, w, h] = box
+    if (!(w > 8 && h > 8)) return null
+    faceProbe ??= document.createElement('canvas')
+    faceProbe.width = faceProbe.height = 16
+    const c = faceProbe.getContext('2d', { willReadFrequently: true })
+    c.drawImage(v, x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6, 0, 0, 16, 16)
+    const d = c.getImageData(0, 0, 16, 16).data
+    let sum = 0
+    for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+    return sum / (d.length / 4)
+  } catch {
+    return null
+  }
 }
 
 export const diagCount = () => rows.length

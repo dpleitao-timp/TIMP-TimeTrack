@@ -218,6 +218,26 @@ export default function Settings({ settings, onChange }) {
               {t('settings.detectCameras')}
             </button>
             {camMsg && <p className="muted">{camMsg}</p>}
+            {toggle('lightFrameAuto', t('settings.lightFrameAuto'), t('settings.lightFrameAutoHint'))}
+          </section>
+
+          <section className="card">
+            <h2>{t('settings.schedule')}</h2>
+            {toggle('scheduleOn', t('settings.scheduleOn'), t('settings.scheduleHint'))}
+            {s.scheduleOn && (
+              <div className="field-pair">
+                <label className="field">
+                  {t('settings.scheduleFrom')}
+                  <input className="field-input" type="time" value={s.scheduleFrom} onChange={set('scheduleFrom')} />
+                </label>
+                <label className="field">
+                  {t('settings.scheduleTo')}
+                  <input className="field-input" type="time" value={s.scheduleTo} onChange={set('scheduleTo')} />
+                </label>
+              </div>
+            )}
+            {s.scheduleOn && toggle('scheduleOffSat', t('settings.scheduleOffSat'), t('settings.scheduleOffHint'))}
+            {s.scheduleOn && toggle('scheduleOffSun', t('settings.scheduleOffSun'), t('settings.scheduleOffHint'))}
           </section>
 
           <section className="card">

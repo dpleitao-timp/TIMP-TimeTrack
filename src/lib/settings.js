@@ -23,6 +23,12 @@ const DEFAULTS = {
   fastLiveness: false, // modo rápido: dispensa o piscar quando o modelo anti-foto tem confiança alta
   debug: false, // mostra os valores do reconhecimento no ecrã de picar
   cameraId: '', // câmara normal ('' = frontal)
+  lightFrameAuto: true, // moldura branca do ecrã de leitura ajusta-se à luz da cara
+  scheduleOn: false, // horário de funcionamento: fora dele a câmara desliga-se e o ecrã fica preto
+  scheduleFrom: '05:00',
+  scheduleTo: '22:00',
+  scheduleOffSat: false, // desligar ao sábado (o dia inteiro em repouso)
+  scheduleOffSun: false, // desligar ao domingo
 }
 
 export function loadSettings() {

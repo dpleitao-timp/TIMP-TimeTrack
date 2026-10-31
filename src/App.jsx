@@ -9,6 +9,7 @@ import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
 import { warmCamera, releaseCamera, acquireCamera } from './lib/useCamera.js'
+import { inHours, weekendOff, WAKE_MS } from './lib/schedule.js'
 
 // Só o Administrador acede a estes separadores.
 const ADMIN_TABS = ['enrol', 'punches', 'settings']
@@ -46,6 +47,18 @@ function CameraKeepAlive({ deviceId }) {
   return <video ref={ref} className="camera-keepalive" muted playsInline aria-hidden="true" tabIndex={-1} />
 }
 
+// Ecrã de repouso (fora do horário de funcionamento): preto, sem câmara. Um toque ativa o tablet durante uns minutos.
+function SleepScreen({ settings, onWake }) {
+  const { t } = useT()
+  return (
+    <button type="button" className="sleep-screen" onClick={onWake}>
+      <span className="sleep-title">{t('sleep.title')}</span>
+      <span>{weekendOff(settings) ? t('sleep.weekend') : t('sleep.range', { from: settings.scheduleFrom, to: settings.scheduleTo })}</span>
+      <span>{t('sleep.touch', { min: Math.round(WAKE_MS / 60000) })}</span>
+    </button>
+  )
+}
+
 export default function App() {
   const { t } = useT()
   const [route, setRoute] = useState(routeFromHash())
@@ -54,13 +67,71 @@ export default function App() {
   const [hasAdmin, setHasAdmin] = useState(null) // null = a verificar
   const [admin, setAdmin] = useState(null) // sessão: { id, name }
   const [pending, setPending] = useState(0) // picagens por enviar
+  const [asleep, setAsleep] = useState(false) // fora do horário de funcionamento e sem toque recente
+  const wakeUntil = useRef(0) // até quando fica ativo depois de um toque fora do horário
+  const sleepingNow = () => !inHours(loadSettings()) && Date.now() > wakeUntil.current
+
+  // horário de funcionamento: recalcula de 15 em 15 s; qualquer toque fora do horário prolonga o tempo ativo
+  useEffect(() => {
+    const check = () => setAsleep(!inHours(settings) && Date.now() > wakeUntil.current)
+    check()
+    const timer = setInterval(check, 15000)
+    const extend = () => {
+      if (!inHours(settings)) wakeUntil.current = Date.now() + WAKE_MS
+    }
+    window.addEventListener('pointerdown', extend)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('pointerdown', extend)
+    }
+  }, [settings])
+
+  const wake = () => {
+    wakeUntil.current = Date.now() + WAKE_MS
+    setAsleep(false)
+  }
+
+  // ao adormecer: fecha a câmara, termina a sessão de Administrador e volta ao ecrã de picagem; ao acordar reabre-a
+  useEffect(() => {
+    if (asleep) {
+      releaseCamera()
+      setAdmin(null)
+      location.hash = '#/kiosk'
+    } else {
+      warmCamera(loadSettings().cameraId)
+    }
+  }, [asleep])
+
+  // com horário ligado, o ecrã fica aceso durante o horário (e o sistema pode apagá-lo fora dele)
+  useEffect(() => {
+    if (!settings.scheduleOn || asleep || !('wakeLock' in navigator)) return
+    let lock = null
+    let cancelled = false
+    const request = async () => {
+      try {
+        lock?.release?.().catch(() => {})
+        lock = await navigator.wakeLock.request('screen')
+        if (cancelled) lock.release().catch(() => {})
+      } catch {
+        /* sem permissão ou aparelho sem suporte: o ecrã segue as definições do sistema */
+      }
+    }
+    request()
+    const onVisible = () => document.visibilityState === 'visible' && request()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      lock?.release?.().catch(() => {})
+    }
+  }, [settings.scheduleOn, asleep])
 
   // Modelos de reconhecimento e câmara abertos em segundo plano assim que a app abre (em qualquer ecrã),
   // para estarem prontos quando alguém carregar em Entrada/Saída. O pequeno atraso deixa a interface desenhar primeiro.
   useEffect(() => {
     const timer = setTimeout(() => {
       initHuman().catch(() => {})
-      warmCamera(loadSettings().cameraId) // câmara sempre ligada: já aberta quando se escolhe Entrada/Saída
+      if (!sleepingNow()) warmCamera(loadSettings().cameraId) // câmara sempre ligada (dentro do horário)
     }, 150)
     return () => clearTimeout(timer)
   }, [])
@@ -161,6 +232,8 @@ export default function App() {
   }
 
   const current = blocked || hasAdmin === null ? 'kiosk' : route
+
+  if (asleep) return <SleepScreen settings={settings} onWake={wake} />
 
   return (
     <>

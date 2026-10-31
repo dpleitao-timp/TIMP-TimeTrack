@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, backendName } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
-import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch } from '../lib/db.js'
+import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch, getClockOffset } from '../lib/db.js'
+import { fmtDateTime } from '../lib/date.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
-import { diagStart, diagPush, videoInfo } from '../lib/diag.js'
+import { diagStart, diagPush, videoInfo, faceLuma } from '../lib/diag.js'
+import { createLightControl } from '../lib/lightframe.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
 
@@ -85,9 +87,28 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
   )
 }
 
+// Data e hora no canto do ecrã de leitura. Usa a hora corrigida pelo servidor (a mesma que se grava na picagem).
+function ScanClock() {
+  const [now, setNow] = useState(() => Date.now())
+  const offset = useRef(0)
+  useEffect(() => {
+    let alive = true
+    getClockOffset().then((o) => {
+      if (alive) offset.current = o
+    })
+    const timer = setInterval(() => setNow(Date.now() + offset.current), 1000)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [])
+  return <div className="scan-clock">{fmtDateTime(now)}</div>
+}
+
 function Scan({ settings, direction, setPending, onDone }) {
   const { t, locale } = useT()
   const videoRef = useRef(null)
+  const kioskRef = useRef(null)
   const { ready, error } = useCamera(videoRef, { deviceId: settings.cameraId })
   const [loading, setLoading] = useState(t('kiosk.loadingModels'))
   const [banner, setBanner] = useState({ kind: 'idle', text: t('kiosk.approach') })
@@ -107,6 +128,7 @@ function Scan({ settings, direction, setPending, onDone }) {
     const startedAt = performance.now()
     let workers = []
     let recognizer = null
+    let light = null // moldura branca adaptativa
     let pauseUntil = 0
     let lastReject = 0
     let badSince = 0 // desde quando o estado é spoof/unknown sem interrupção (0 = não está)
@@ -118,6 +140,7 @@ function Scan({ settings, direction, setPending, onDone }) {
       workers = await listWorkers()
       recognizer = createRecognizer(() => settingsRef.current, workers)
       diagStart() // um registo novo por cada leitura (o último fica disponível nas Definições)
+      light = createLightControl((v) => kioskRef.current?.style.setProperty('--light-frame', `${v}vmin`), settingsRef.current.lightFrameAuto !== false)
       if (!workers.some((w) => !w.stale && !w.broken)) show({ kind: 'warn', text: workers.length ? t('kiosk.staleWorkers') : t('kiosk.noWorkers') })
 
       const loop = async () => {
@@ -132,7 +155,8 @@ function Scan({ settings, direction, setPending, onDone }) {
           if (stop) return
           const r = recognizer.push(face, gestures)
           setDebug(s.debug ? { ...r, detMs } : null)
-          if (s.debug) diagPush({ detMs, why, face: raw, r, trace: recognizer.trace(), video: videoInfo(videoRef.current) })
+          if (face) light.update(faceLuma(videoRef.current, face.box)) // a luz da cara decide a espessura da moldura
+          if (s.debug) diagPush({ detMs, why, face: raw, r, trace: recognizer.trace(), video: videoInfo(videoRef.current), light: light.state() })
           if (r.status === 'hold') return requestAnimationFrame(loop) // falha momentânea do detetor: não mexe no ecrã
           if (r.status === 'none') {
             setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))
@@ -218,14 +242,20 @@ function Scan({ settings, direction, setPending, onDone }) {
 
   return (
     <div className="kiosk-wrap">
-      <div className={`kiosk ${isIn ? 'in' : 'out'}`}>
+      <div ref={kioskRef} className={`kiosk ${isIn ? 'in' : 'out'}`}>
         <video ref={videoRef} muted playsInline className="mirror" />
         <div className="kiosk-top">
           <span className="dir">
             {isIn ? <IconIn size={26} /> : <IconOut size={26} />}
             {(isIn ? t('dir.in') : t('dir.out')).toLocaleUpperCase(locale)}
           </span>
+          {settings.obra?.trim() && (
+            <span className="obra-pill" title={t('kiosk.obraLabel')}>
+              {t('kiosk.obraLabel')} <strong>{settings.obra.trim()}</strong>
+            </span>
+          )}
         </div>
+        <ScanClock />
         <div className={`banner ${banner.kind}`}>
           <div className="banner-main">{error || loading || banner.text}</div>
           {banner.sub && !loading && <div className="banner-sub">{banner.sub}</div>}

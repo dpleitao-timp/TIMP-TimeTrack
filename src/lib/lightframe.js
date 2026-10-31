@@ -35,6 +35,6 @@ export function createLightControl(apply, auto = true) {
         apply(current)
       }
     },
-    state: () => ({ luma: ema, frame: auto ? current : FRAME_DEFAULT }),
+    state: () => ({ luma: ema, frame: auto ? current : FRAME_DEFAULT, auto }),
   }
 }

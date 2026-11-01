@@ -302,7 +302,6 @@ export default function Settings({ settings, onChange }) {
                 <input className="field-input" type="number" min="1" max="10" value={s.stableFrames} onChange={set('stableFrames')} />
               </label>
             </div>
-            {toggle('fastLiveness', t('settings.fastLiveness'), t('settings.fastLivenessHint'))}
           </details>
 
           <section className="card">

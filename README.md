@@ -97,7 +97,7 @@ O intervalo (Definições, em segundos) é calculado a partir das picagens guard
 - **Piscar relativo:** além do limiar do Human, deteta quedas de 35% na abertura dos olhos (apanha pestanejos parciais que a taxa de fotogramas não apanha). Era a principal causa de ter de piscar várias vezes.
 - **Sem o modelo da íris** (não é usado: piscar e rotação saem da malha facial): menos dois modelos por fotograma.
 - **Menos renderizações** no ecrã de picar: o aviso só se atualiza quando muda.
-- **Modo rápido de vida** (Definições, desligado por omissão): dispensa o piscar quando a média do anti-foto do modelo é ≥ 0,8. Menos seguro; testar com o modo diagnóstico.
+- **Prova de vida sempre obrigatória:** piscar ou mexer a cabeça em cada leitura (picagem e entrada na administração). O "modo rápido de vida", que a dispensava quando o anti-foto dava 0,8 ou mais, foi retirado (uma foto ou um vídeo que o modelo classificasse alto passava sem movimento).
 
 ## Aceleração gráfica (experimental)
 Em Definições → Reconhecimento: `WebGL` (por omissão) ou `WebGPU`; se o aparelho não suportar WebGPU, o Human usa WebGL. A app recarrega ao guardar. Com o **modo diagnóstico** ligado, o ecrã de picar mostra o backend e o tempo da deteção por fotograma (`ms`).

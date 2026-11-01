@@ -10,7 +10,7 @@ import { useT } from '../lib/i18n.jsx'
 const TIMEOUT_MS = 45000
 
 // Acesso à administração por reconhecimento facial: só desbloqueia um Administrador. Comporta-se como o ecrã de picar
-// (mesmo reconhecedor, avisos vermelhos só se persistirem, pede o piscar logo que sabe quem é, modo rápido de vida e
+// (mesmo reconhecedor, avisos vermelhos só se persistirem, pede o piscar logo que sabe quem é e
 // moldura de luz adaptativa), só que no fim desbloqueia em vez de registar uma picagem.
 export default function AdminLogin({ settings, onUnlock, onCancel }) {
   const { t } = useT()

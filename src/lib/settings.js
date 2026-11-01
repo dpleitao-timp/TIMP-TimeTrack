@@ -25,7 +25,6 @@ const DEFAULTS = {
   stableFrames: 2, // avaliações seguidas com a mesma identidade
   avgFrames: 5, // fotogramas cuja média decide o reconhecimento
   antispoofMin: 0.35, // média mínima do anti-foto/vida do modelo (0 desliga)
-  fastLiveness: false, // modo rápido: dispensa o piscar quando o modelo anti-foto tem confiança alta
   debug: false, // mostra os valores do reconhecimento no ecrã de picar
   cameraId: '', // câmara normal ('' = frontal)
   orientation: 'auto', // orientação do ecrã: 'auto' (segue o aparelho) | 'landscape' | 'portrait'
@@ -49,6 +48,11 @@ export function loadSettings() {
   if ('supabaseUrl' in s || 'supabaseAnonKey' in s) {
     delete merged.supabaseUrl
     delete merged.supabaseAnonKey
+    saveSettings(merged)
+  }
+  // O modo rápido de vida foi retirado (a prova de vida exige sempre piscar ou mexer a cabeça): apaga a definição antiga.
+  if ('fastLiveness' in s) {
+    delete merged.fastLiveness
     saveSettings(merged)
   }
   // A biometria já não sai do tablet (a partilha entre tablets foi retirada): apaga a chave da frota, que estava guardada em claro.

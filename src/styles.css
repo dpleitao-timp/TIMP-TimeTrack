@@ -334,6 +334,7 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 }
 .choice-btn:active { transform: scale(0.98); }
 .choice-admin { margin-top: 22px; min-height: 48px; }
+.setup-card { width: 100%; max-width: 520px; margin: 24px auto; }
 .kiosk.admin .dir { background: var(--accent); }
 .header-chip.button { border: 0; color: var(--text); }
 .dock-back { flex: 1; max-width: 420px; }

@@ -11,6 +11,7 @@ import { createLightControl, setFrameVars } from '../lib/lightframe.js'
 import { BAD_SHOW_MS, isAlive, allowedDirections } from '../lib/scanrules.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
+import Setup, { SETUP_ID } from './Setup.jsx'
 import ScanClock from './ScanClock.jsx'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
@@ -36,6 +37,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
   const list = missing.map((k) => t(`settings.${k}`)).join(', ')
   const [direction, setDirection] = useState(null) // null | 'in' | 'out' | 'meal_out' | 'meal_in'
   const [adminLogin, setAdminLogin] = useState(false)
+  const [setup, setSetup] = useState(false) // sem Administrador: abrir a configuração com o código de instalação
   const [modelsError, setModelsError] = useState('')
   const modelsState = useModelsReady()
   const ico = settings.mealPunches ? 44 : 72 // com as 4 opções os ícones são mais pequenos (cabem 4 numa linha)
@@ -44,6 +46,10 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
     // modelos pré-carregados para a câmara reconhecer logo ao ligar (a câmara não é ligada aqui)
     initHuman().catch((e) => setModelsError(e?.message || String(e)))
   }, [])
+
+  if (setup) {
+    return <Setup onCancel={() => setSetup(false)} onUnlock={() => { setSetup(false); onAdminUnlock({ id: SETUP_ID, name: t('setup.sessionName') }, '#/settings') }} />
+  }
 
   if (adminLogin) {
     return (
@@ -115,8 +121,9 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
           )}
         </div>
         {modelsError && <p className="notice notice-error">{t('kiosk.modelsFail', { err: modelsError })}</p>}
-        {hasAdmin && (
-          <button type="button" className="btn btn-secondary choice-admin" onClick={() => setAdminLogin(true)}>
+        {hasAdmin !== null && (
+          // com Administrador: reconhecimento facial; sem Administrador: código de instalação (a administração nunca fica aberta)
+          <button type="button" className="btn btn-secondary choice-admin" onClick={() => (hasAdmin ? setAdminLogin(true) : setSetup(true))}>
             {t('kiosk.admin')}
           </button>
         )}

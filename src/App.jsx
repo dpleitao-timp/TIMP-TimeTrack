@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import Kiosk from './views/Kiosk.jsx'
+import { SETUP_ID } from './views/Setup.jsx'
 import ScanClock from './views/ScanClock.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync, syncRoster } from './lib/sync.js'
@@ -160,8 +161,8 @@ export default function App() {
   const refreshAdmin = useCallback(async () => {
     const workers = await listWorkers()
     setHasAdmin(hasUsableAdmin(workers))
-    // se o Administrador com sessão aberta perdeu o perfil (ou foi apagado), a sessão termina
-    setAdmin((a) => (a && !workers.some((w) => w.id === a.id && w.role === 'admin' && isUsable(w)) ? null : a))
+    // se o Administrador com sessão aberta perdeu o perfil (ou foi apagado), a sessão termina (a de instalação não é de um trabalhador)
+    setAdmin((a) => (a && a.id !== SETUP_ID && !workers.some((w) => w.id === a.id && w.role === 'admin' && isUsable(w)) ? null : a))
   }, [])
 
   useEffect(() => {
@@ -207,8 +208,9 @@ export default function App() {
     return () => window.removeEventListener('queue-changed', load)
   }, [])
 
-  // Sem Administrador registado (primeiro arranque) a administração está aberta, para registar o primeiro.
-  const unlocked = hasAdmin === false || !!admin
+  // A administração nunca está aberta: só com a sessão de um Administrador (reconhecimento facial) ou, se ainda não há nenhum, com a sessão de
+  // instalação, que só se abre com um código de instalação válido (ver Setup.jsx).
+  const unlocked = !!admin
 
   const logout = useCallback(() => {
     setAdmin(null)
@@ -293,7 +295,7 @@ export default function App() {
         v{__APP_VERSION__} · {__APP_BUILD__} · {__APP_DATE__}
       </div>
       {current === 'kiosk' && (
-        <Kiosk settings={settings} hasAdmin={hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
+        <Kiosk settings={settings} hasAdmin={hasAdmin} onAdminUnlock={(w, route = '#/punches') => { setAdmin({ id: w.id, name: w.name }); location.hash = route }} />
       )}
       <Suspense fallback={null}>
         {current === 'enrol' && <Enrol settings={settings} onRegistered={onRegistered} />}

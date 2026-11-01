@@ -1,0 +1,25 @@
+# Cabeçalhos de segurança da app (Cloudflare Workers, ficheiros estáticos). Ver docs/branches/26.0.0.md (M6 da auditoria).
+#
+# A CSP só deixa a app falar com ela própria e com o relay. O endereço do relay está fixo aqui: se mudar (ou se um tablet for apontado a outro
+# relay nas Definições), este ficheiro tem de mudar também, senão o navegador bloqueia os pedidos.
+#   'wasm-unsafe-eval'  só para o motor SFace (WebAssembly do onnxruntime); o motor por omissão (FaceRes, WebGL) não o usa.
+#   connect-src data:   o Human faz fetch de uma imagem embebida (data:) ao aquecer os modelos.
+#   worker-src 'self'   o service worker da PWA; blob: por precaução (o onnxruntime em vários fios, hoje desligado).
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' data: https://punch-relay.timp-pt.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+
+# O service worker e a página de entrada nunca ficam em cache: uma correção de segurança chega aos tablets na abertura seguinte.
+/sw.js
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+
+# Ficheiros com hash no nome: nunca mudam.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

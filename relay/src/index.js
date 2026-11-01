@@ -44,8 +44,9 @@ function corsHeaders(env) {
   }
 }
 
+// As respostas têm dados de pessoas e do estado dos tablets: nunca ficam em cache, e o navegador não adivinha o tipo.
 const json = (body, status = 200, extra = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...extra } })
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra } })
 
 // Regista que o tablet acabou de falar com o relay (batimento do relógio). Só depois de autenticado.
 const touchDevice = (env, deviceId) =>

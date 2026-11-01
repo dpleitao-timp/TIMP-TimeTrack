@@ -45,7 +45,6 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
       const loop = async () => {
         if (stop) return
         if (performance.now() - startedAt > TIMEOUT_MS) return cb.current.onCancel()
-        const s = settingsRef.current
         try {
           const { face, gestures } = await detect(videoRef.current)
           if (stop) return
@@ -57,7 +56,7 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
             return requestAnimationFrame(loop)
           }
           const now = performance.now()
-          const alive = isAlive(s, r)
+          const alive = isAlive(r)
           if (r.status !== 'spoof' && r.status !== 'unknown') badSince = 0
           if (r.status === 'collecting') {
             show({ kind: 'idle', text: t('kiosk.recognizing') })

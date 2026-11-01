@@ -224,6 +224,14 @@ check('o token antigo já não autentica nada → 401', r.status === 401, String
 r = await fetch(`${RELAY}/punch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'x'.repeat(300000) })
 check('corpo acima do limite → 413 sem o ler (e sem autenticar)', r.status === 413, String(r.status))
 
+// o ID de uma picagem é `<dispositivo>-<dígitos>`: com letras ou hífenes a seguir ao prefixo (era assim que `dev-1` apanhava IDs de `dev-1-2`) é recusado
+r = await post({ deviceId: DEVICE, punches: [punch(base + 410, { eventId: `${DEVICE}-2-000001` }), punch(base + 411, { eventId: `${DEVICE}-12a` }), punch(base + 412, { eventId: `${DEVICE}-` })] })
+j = await r.json()
+check('ID com algo que não são dígitos depois do prefixo do dispositivo é rejeitado', r.status === 200 && j.rejected.length === 3 && j.accepted.length === 3, JSON.stringify(j))
+r = await dev.req('POST', '/punch/delete', { deviceId: DEVICE, eventIds: [`${DEVICE}-2-000001`, `${DEVICE}-x`] })
+j = await r.json()
+check('apagar também só aceita IDs do dispositivo (prefixo e dígitos)', r.status === 200 && j.accepted.length === 0, JSON.stringify(j))
+
 // a semelhança (confidence) fora de -1..1 ou não numérica não pode chegar ao Supabase (numeric(5,3) rebentava o lote inteiro): vira null e a picagem segue
 const cid = (n) => `${DEVICE}-${String(base + n).padStart(6, '0')}`
 r = await post({ deviceId: DEVICE, punches: [punch(base + 400, { confidence: 0.5 }), punch(base + 401, { confidence: 1000 }), punch(base + 402, { confidence: -0.4 }), punch(base + 403, { confidence: 'x' }), punch(base + 404, { confidence: -50 })] })

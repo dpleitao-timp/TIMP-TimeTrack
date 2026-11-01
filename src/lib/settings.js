@@ -20,7 +20,6 @@ const DEFAULTS = {
   engine: 'faceres', // motor de reconhecimento
   threshold: 0.55, // similaridade mínima do FaceRes (0..1)
   thresholdSface: 0.7, // semelhança mínima do SFace (cosseno, -1..1): escala diferente da do FaceRes, não se aproveitam os valores. 0,70 fica 0,34 acima do pior caso medido entre pessoas diferentes (0,36) e 0,14 abaixo da pior leitura real (0,84); cada tablet afina-o com a Avaliação do reconhecimento
-  liveness: true, // exige piscar / virar a cabeça
   cooldownSec: 60, // ignora nova picagem do mesmo trabalhador
   stableFrames: 2, // avaliações seguidas com a mesma identidade
   avgFrames: 5, // fotogramas cuja média decide o reconhecimento
@@ -48,6 +47,11 @@ export function loadSettings() {
   if ('supabaseUrl' in s || 'supabaseAnonKey' in s) {
     delete merged.supabaseUrl
     delete merged.supabaseAnonKey
+    saveSettings(merged)
+  }
+  // A prova de vida já não se pode desligar (o interruptor foi retirado): apaga a definição antiga, que num tablet com "desligada" já não conta.
+  if ('liveness' in s) {
+    delete merged.liveness
     saveSettings(merged)
   }
   // O modo rápido de vida foi retirado (a prova de vida exige sempre piscar ou mexer a cabeça): apaga a definição antiga.
@@ -113,10 +117,20 @@ export function bumpStat(name, ms) {
 export const resetStats = () => localStorage.removeItem(STATS_KEY)
 
 // O tablet fala com o relay se tem o endereço e uma credencial: a chave própria (enrolled) ou, nos tablets das versões anteriores, o token.
+// O endereço do relay tem de ser https (o código de instalação vai num cabeçalho, e em http apanhava-o quem estivesse na mesma rede). http só para
+// desenvolvimento, em localhost.
+export function isSecureUrl(url) {
+  try {
+    const u = new URL(String(url ?? '').trim())
+    return u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname))
+  } catch {
+    return false
+  }
+}
 const hasCredential = (s) => s.enrolled === true || !!String(s.deviceToken ?? '').trim()
-export const isCloudConfigured = (s) => !!(s.relayUrl && hasCredential(s))
+export const isCloudConfigured = (s) => !!(isSecureUrl(s.relayUrl) && hasCredential(s))
 
 // Campos sem os quais o tablet não funciona (não pica): dizem quem é, onde está e como fala com o relay.
 const REQUIRED_FIELDS = ['deviceName', 'deviceId', 'obra', 'relayUrl', 'deviceToken']
 // Os que faltam, pela ordem das Definições. O "token" é o código de instalação: está satisfeito se o tablet já se ligou ao relay.
-export const missingFields = (s) => REQUIRED_FIELDS.filter((k) => (k === 'deviceToken' ? !hasCredential(s) : !String(s[k] ?? '').trim()))
+export const missingFields = (s) => REQUIRED_FIELDS.filter((k) => (k === 'deviceToken' ? !hasCredential(s) : k === 'relayUrl' ? !isSecureUrl(s.relayUrl) : !String(s[k] ?? '').trim()))

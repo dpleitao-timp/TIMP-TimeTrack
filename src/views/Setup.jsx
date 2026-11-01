@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { loadSettings, saveSettings } from '../lib/settings.js'
+import { loadSettings, saveSettings, isSecureUrl } from '../lib/settings.js'
 import { enrollWithCode, markEnrolled } from '../lib/relay.js'
 import { useT } from '../lib/i18n.jsx'
 
@@ -26,6 +26,7 @@ export default function Setup({ onUnlock, onCancel }) {
     const c = code.trim()
     const missing = [!url && 'settings.relayUrl', !id && 'settings.deviceId', !c && 'settings.deviceToken'].filter(Boolean)
     if (missing.length) return setErr(t('settings.required', { list: missing.map((k) => t(k)).join(', ') }))
+    if (!isSecureUrl(url)) return setErr(t('settings.relayUrlBad'))
     setBusy(true)
     setErr('')
     try {

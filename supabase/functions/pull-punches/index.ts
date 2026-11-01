@@ -9,7 +9,8 @@
 //   CRON_SECRET   segredo que o pg_cron envia no cabeçalho x-cron-secret
 // Publicar sem verificação JWT (a autenticação é o x-cron-secret):
 //   supabase functions deploy pull-punches --no-verify-jwt
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Versão fixa (a 2.118.0 é a que o esm.sh servia como "@2" em 2026-11-01): com "@2" a versão mudava sozinha, e estas funções têm a chave de serviço do Supabase.
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.118.0'
 
 const BATCH = 200
 const MAX_BATCHES = 10 // por execução; o resto fica para a próxima
@@ -76,6 +77,7 @@ Deno.serve(async (req) => {
           typeof p?.eventId === 'string' &&
           typeof p?.deviceId === 'string' &&
           p.eventId.startsWith(`${p.deviceId}-`) &&
+          /^\d+$/.test(p.eventId.slice(p.deviceId.length + 1)) && // depois do prefixo só dígitos (o contador): sem isto `dev-1` apanhava IDs de `dev-1-2`
           p.eventId.length <= 64 &&
           p.deviceId.length <= 64 &&
           typeof p?.sageId === 'string' &&

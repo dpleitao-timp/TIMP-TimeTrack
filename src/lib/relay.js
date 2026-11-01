@@ -3,7 +3,7 @@
 // tablet (Definições, localStorage, IndexedDB) não dá nenhum segredo que se use noutro computador. O relay só tem a parte pública.
 // Ligar o tablet ao relay (enrol): o código de instalação (uso único, dado por add-device.mjs) vai uma só vez com a chave pública e
 // depois deixa de servir. Os tablets que já tinham um token das versões anteriores ligam-se sozinhos com ele, uma só vez.
-import { loadSettings, saveSettings } from './settings.js'
+import { loadSettings, saveSettings, isSecureUrl } from './settings.js'
 import { getClockOffset, setClockOffset, getDeviceKeys, saveDeviceKeys } from './db.js'
 
 const enc = new TextEncoder()
@@ -12,7 +12,11 @@ const SIGN = { name: 'ECDSA', hash: 'SHA-256' }
 
 const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 const sha256Hex = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('')
-const base = (settings) => settings.relayUrl.replace(/\/$/, '')
+// Nunca se fala com um relay que não seja https (ver isSecureUrl).
+const base = (settings) => {
+  if (!isSecureUrl(settings.relayUrl)) throw Object.assign(new Error('o endereço do relay tem de ser https'), { code: 'relay_not_https' })
+  return settings.relayUrl.trim().replace(/\/$/, '')
+}
 
 // A chave do dispositivo: cria-se uma só vez e fica guardada (e em memória, para não ler a IndexedDB a cada pedido). A chave pública exporta-se sempre; a privada nunca.
 let keysPromise

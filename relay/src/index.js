@@ -72,6 +72,10 @@ const unit = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v 
 // segue: a coluna do Supabase é numeric(5,3) e um valor como 1000 fazia falhar o lote inteiro, parando a sincronização de todos os tablets.
 const similarity = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= -1 && v <= 1 ? Math.round(v * 1000) / 1000 : null)
 
+// O ID de uma picagem é `<id do dispositivo>-<contador>`: o prefixo tem de ser o do dispositivo E a seguir só dígitos. Só com o prefixo, o dispositivo
+// `dev-1` podia enviar `dev-1-2-000001` e ficar com o ID de uma picagem do dispositivo `dev-1-2` (que depois seria ignorada como repetida) ou apagá-la.
+const eventIdOk = (deviceId, id) => typeof id === 'string' && id.length <= 64 && id.startsWith(`${deviceId}-`) && /^\d+$/.test(id.slice(deviceId.length + 1))
+
 // A obra compara-se sem maiúsculas nem espaços nas pontas (como a intranet).
 const obraKey = (s) => String(s ?? '').trim().toLowerCase()
 
@@ -199,9 +203,7 @@ async function handlePunch(request, url, env) {
   for (const p of punches) {
     const t = Date.parse(p?.punchedAt)
     const valid =
-      typeof p?.eventId === 'string' &&
-      p.eventId.length <= 64 &&
-      p.eventId.startsWith(`${deviceId}-`) && // o ID tem de pertencer a este dispositivo
+      eventIdOk(deviceId, p?.eventId) && // o ID tem de pertencer a este dispositivo
       typeof p?.sageId === 'string' &&
       p.sageId.trim() !== '' &&
       p.sageId.length <= 32 &&
@@ -295,7 +297,7 @@ async function handleDelete(request, url, env) {
   const ids = body?.eventIds
   if (!Array.isArray(ids) || !ids.length || ids.length > MAX_BATCH) return json({ error: 'invalid_payload' }, 400, cors)
 
-  const valid = ids.filter((i) => typeof i === 'string' && i.length <= 64 && i.startsWith(`${deviceId}-`))
+  const valid = ids.filter((i) => eventIdOk(deviceId, i))
   const now = Math.floor(Date.now() / 1000)
   const stmts = []
   for (const id of valid) {

@@ -249,7 +249,7 @@ function Scan({ settings, direction, onDone }) {
             return requestAnimationFrame(loop)
           }
           const now = performance.now()
-          const alive = isAlive(s, r)
+          const alive = isAlive(r)
           if (r.status !== 'spoof' && r.status !== 'unknown') badSince = 0
           if (r.status === 'collecting') {
             show({ kind: 'idle', text: t('kiosk.recognizing') })

@@ -8,7 +8,7 @@ import { fmtDateTime } from '../lib/date.js'
 import { diagCount, diagText } from '../lib/diag.js'
 import { applyOrientation, canLock, currentOrientation } from '../lib/orientation.js'
 import { initHuman, similarity } from '../lib/face.js'
-import { thresholdFor, missingFields, loadSettings } from '../lib/settings.js'
+import { thresholdFor, missingFields, loadSettings, isSecureUrl } from '../lib/settings.js'
 import { enrollWithCode } from '../lib/relay.js'
 import { evaluate } from '../lib/evaluate.js'
 
@@ -77,6 +77,10 @@ export default function Settings({ settings, onChange }) {
     if (loadSettings().enrolled === true && !newCode) {
       next.enrolled = true
       next.deviceToken = ''
+    }
+    if (next.relayUrl && !isSecureUrl(next.relayUrl)) {
+      setMsg('')
+      return setErr(t('settings.relayUrlBad'))
     }
     // Os campos obrigatórios têm de estar preenchidos: sem eles o tablet não pica (ver missingFields), por isso não se guarda assim.
     const missing = missingFields(next)
@@ -259,7 +263,6 @@ export default function Settings({ settings, onChange }) {
               {t('settings.cooldown')}
               <input className="field-input" type="number" min="0" value={s.cooldownSec} onChange={set('cooldownSec')} />
             </label>
-            {toggle('liveness', t('settings.liveness'), t('settings.livenessHint'))}
           </section>
 
           <details className="card settings-adv">

@@ -7,7 +7,8 @@
 // Segredos (os mesmos da pull-punches): RELAY_URL, PULL_SECRET, CRON_SECRET.
 // Publicar sem verificação JWT (a autenticação é o x-cron-secret):
 //   supabase functions deploy publish-roster --no-verify-jwt
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Versão fixa (a 2.118.0 é a que o esm.sh servia como "@2" em 2026-11-01): com "@2" a versão mudava sozinha, e estas funções têm a chave de serviço do Supabase.
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.118.0'
 
 const CHUNK = 400 // o relay aceita até 500 por pedido
 const PAGE = 1000

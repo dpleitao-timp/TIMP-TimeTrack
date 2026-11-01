@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { listQueue, deletePunch } from '../lib/db.js'
 import { loadStats, resetStats, loadSettings } from '../lib/settings.js'
 import { flushQueue } from '../lib/sync.js'
+import { buildExport, deliverFile, confirmHanded, importPunchFile } from '../lib/transfer.js'
 import { useT } from '../lib/i18n.jsx'
 import { fmtDateTime, localIso } from '../lib/date.js'
 import DateField from './DateField.jsx'
@@ -44,9 +45,55 @@ export default function Punches() {
       } else setInfo('')
     } catch (e) {
       setInfo('')
-      setMsg(e.code === 'SENDING' ? t('punches.busy') : String(e.message || e))
+      setMsg(e.code === 'SENDING' ? t('punches.busy') : e.code === 'HANDED' ? t('punches.errHanded') : String(e.message || e))
     }
     load()
+  }
+
+  // Transferir picagens para outro aparelho (obras sem internet): exportar daqui, importar no outro.
+  const [includeHanded, setIncludeHanded] = useState(false)
+  const [busy, setBusy] = useState(false)
+  async function exportPunches() {
+    setMsg('')
+    setInfo('')
+    setBusy(true)
+    try {
+      const exp = await buildExport(loadSettings(), { includeHanded })
+      if (!exp) return setInfo(t('transfer.nothing'))
+      if (!(await deliverFile(exp.file))) return setInfo(t('transfer.kept'))
+      // só se sabe que o outro aparelho recebeu o ficheiro se o utilizador o disser
+      if (confirm(t('transfer.confirmHanded', { n: exp.count }))) {
+        await confirmHanded(exp.eventIds)
+        setInfo(t('transfer.handedDone', { n: exp.count }))
+      } else setInfo(t('transfer.kept'))
+    } catch (e) {
+      setMsg(String(e.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function importPunches(e) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // permite escolher o mesmo ficheiro outra vez
+    if (!file) return
+    setMsg('')
+    setInfo('')
+    setBusy(true)
+    try {
+      const r = await importPunchFile(loadSettings(), await file.text())
+      setInfo(t('transfer.imported', { n: r.added, dup: r.duplicates }))
+      flushQueue(loadSettings()).then(load) // se já há rede, seguem já para o relay
+    } catch (err) {
+      setMsg(
+        err.code === 'obra' ? t('transfer.errObra', { file: err.file, own: err.own })
+        : err.code === 'noObra' ? t('transfer.errNoObra')
+        : err.code === 'same' ? t('transfer.errSame')
+        : err.code === 'file' ? t('transfer.errFile')
+        : String(err.message || err),
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   // Resumo por trabalhador: primeira entrada / última saída e picagens sem par.
@@ -69,6 +116,21 @@ export default function Punches() {
 
       {msg && <p className="notice notice-warn">{msg}</p>}
       {info && <p className="notice notice-ok">{info}</p>}
+
+      <h3>{t('transfer.title')}</h3>
+      <div className="card">
+        <p className="muted" style={{ marginTop: 0 }}>{t('transfer.help')}</p>
+        <div className="btn-row">
+          <button type="button" className="btn btn-secondary btn-small" onClick={exportPunches} disabled={busy}>{t('transfer.export')}</button>
+          <label className="btn btn-secondary btn-small" style={{ cursor: 'pointer' }}>
+            {t('transfer.import')}
+            <input type="file" accept=".json,application/json" onChange={importPunches} disabled={busy} hidden />
+          </label>
+        </div>
+        <label className="muted" style={{ display: 'block', marginTop: 10 }}>
+          <input type="checkbox" checked={includeHanded} onChange={(e) => setIncludeHanded(e.target.checked)} /> {t('transfer.includeHanded')}
+        </label>
+      </div>
 
       <h3>{t('punches.daySummary')}</h3>
       {!Object.keys(summary).length && <p className="empty-text">{t('punches.noneDay')}</p>}
@@ -107,7 +169,7 @@ export default function Punches() {
                 <td>{t({ in: 'dir.in', out: 'dir.out', meal_out: 'dir.mealOut', meal_in: 'dir.mealIn' }[p.direction] ?? 'dir.out')}</td>
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
-                <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : `⏳ (${p.attempts})`}</td>
+                <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : p.handed ? <span title={t('punches.handed')}>📱</span> : `⏳ (${p.attempts})`}</td>
                 <td><button className="link-button" onClick={() => remove(p)}>{t('punches.delete')}</button></td>
               </tr>
             ))}

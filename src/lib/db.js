@@ -257,6 +257,11 @@ export async function deletePunch(eventId) {
     await tx.done
     throw Object.assign(new Error('A picagem está a ser enviada.'), { code: 'SENDING' })
   }
+  if (row.handed) {
+    // já está noutro aparelho com outro ID: apagá-la aqui não a apagava lá
+    await tx.done
+    throw Object.assign(new Error('A picagem já foi entregue a outro aparelho.'), { code: 'HANDED' })
+  }
   if (row.synced) await tx.store.put({ ...row, voided: true })
   else await tx.store.delete(eventId)
   await tx.done
@@ -319,8 +324,75 @@ export async function listQueue() {
 // Por enviar: nem enviadas nem recusadas (uma recusada não volta a ser enviada). Da mais antiga para a mais recente.
 export async function pendingPunches() {
   const d = await db()
-  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided)
+  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided && !p.handed)
   return rows.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))
+}
+
+// --- Transferência para outro aparelho (sem internet): ver transfer.js ---
+// Picagens a passar a outro aparelho: as por enviar e, se se pedir, as já entregues (o outro aparelho ignora as que já importou).
+export async function exportablePunches(includeHanded = false) {
+  const d = await db()
+  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided && (includeHanded || !p.handed))
+  return rows.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))
+}
+
+// Marca como entregues a outro aparelho: este deixa de as enviar (o outro envia-as com IDs seus, por isso enviar daqui duplicava-as).
+export async function markHanded(eventIds) {
+  const d = await db()
+  const tx = d.transaction('queue', 'readwrite')
+  const at = new Date().toISOString()
+  for (const id of eventIds) {
+    const row = await tx.store.get(id)
+    if (row && !row.synced && !row.handed) await tx.store.put({ ...row, handed: at })
+  }
+  await tx.done
+  queueChanged()
+}
+
+// Regista como suas as picagens vindas de outro aparelho (ficheiro de transferência). Cada uma ganha um ID novo deste aparelho; o ID
+// original fica em `imported` e na lista `meta.imported` (id → hora da importação), que impede importar o mesmo ficheiro duas vezes.
+// Tudo numa só transação: ou entra o ficheiro todo ou nada. Devolve { added, duplicates }.
+const IMPORTED_KEEP_MS = 90 * 864e5
+export async function enqueueImported(deviceId, items) {
+  const d = await db()
+  const tx = d.transaction(['queue', 'meta'], 'readwrite')
+  const queue = tx.objectStore('queue')
+  const meta = tx.objectStore('meta')
+  const seen = (await meta.get('imported')) || {}
+  let counter = (await meta.get('counter')) || 0
+  const now = Date.now()
+  let added = 0
+  let duplicates = 0
+  for (const it of items) {
+    if (seen[it.origin]) {
+      duplicates++
+      continue
+    }
+    counter++
+    await queue.put({
+      eventId: `${deviceId}-${String(counter).padStart(6, '0')}`,
+      deviceId,
+      direction: it.direction,
+      sageId: it.sageId,
+      obra: it.obra,
+      confidence: it.confidence,
+      second: it.second,
+      real: it.real,
+      live: it.live,
+      punchedAt: it.punchedAt, // a hora original da picagem, não a da importação
+      synced: 0,
+      attempts: 0,
+      imported: it.origin,
+    })
+    seen[it.origin] = now
+    added++
+  }
+  for (const k of Object.keys(seen)) if (now - seen[k] > IMPORTED_KEEP_MS) delete seen[k]
+  await meta.put(counter, 'counter')
+  await meta.put(seen, 'imported')
+  await tx.done
+  queueChanged()
+  return { added, duplicates }
 }
 
 // O relay recusou estas picagens (dados inválidos): ficam marcadas e visíveis, nunca como enviadas.
@@ -363,9 +435,11 @@ export async function pruneSynced(days = 7) {
   lastPrune = Date.now()
   const d = await db()
   const limit = new Date(Date.now() - days * 864e5).toISOString()
+  const handedLimit = new Date(Date.now() - 30 * 864e5).toISOString() // as entregues a outro aparelho ficam 30 dias (cópia de segurança)
   const tx = d.transaction('queue', 'readwrite')
   for (const row of await tx.store.getAll()) {
     if (row.synced && !row.voided && row.punchedAt < limit) await tx.store.delete(row.eventId) // as apagadas ficam até o pedido chegar ao relay
+    else if (row.handed && !row.synced && row.handed < handedLimit) await tx.store.delete(row.eventId)
   }
   await tx.done
 }

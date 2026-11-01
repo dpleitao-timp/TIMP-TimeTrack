@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS devices (
   token_hash  TEXT NOT NULL,                 -- sha256 hex do token do tablet (o token em claro nunca é guardado)
   active      INTEGER NOT NULL DEFAULT 1,    -- 0 = revogado
   obra        TEXT,                          -- obra do tablet: se definida, a lista de trabalhadores é só dessa obra
+  last_seen   INTEGER,                       -- último contacto autenticado do tablet (segundos unix), para saber se está vivo
   created_at  INTEGER NOT NULL DEFAULT (unixepoch())
 );
 

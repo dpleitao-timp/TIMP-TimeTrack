@@ -3,6 +3,7 @@
 //   Tablet  ── POST /punch ──►  [outbox]  ◄── GET /pull, POST /ack ──  Supabase
 //   Tablet  ◄── GET /roster ──  [roster]  ◄── POST /roster ──  Supabase
 //   Tablet  ── POST /punch/delete ──►  [deletions]  ◄── GET /pull-deletions, POST /ack-deletions ──  Supabase
+//   Tablet  ── qualquer pedido autenticado ──►  [devices.last_seen]  ◄── GET /devices-status ──  Supabase (função relay-status da intranet)
 //
 // O tablet escreve picagens (e pedidos para as apagar) e lê a lista de trabalhadores (token do dispositivo). O Supabase lê as picagens,
 // confirma-as e publica a lista (pedidos assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
@@ -43,6 +44,10 @@ function corsHeaders(env) {
 
 const json = (body, status = 200, extra = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...extra } })
+
+// Regista que o tablet acabou de falar com o relay (batimento do relógio). Só depois de autenticado.
+const touchDevice = (env, deviceId) =>
+  env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000), deviceId).run()
 
 // Assinatura do Supabase: HMAC-SHA256(PULL_SECRET, método \n caminho+query \n timestamp \n corpo)
 async function verifySignature(request, url, bodyText, secret) {
@@ -87,6 +92,8 @@ async function handlePunch(request, env) {
   if (!device || !device.active || !timingSafeEqualHex(device.token_hash, await sha256Hex(token))) {
     return json({ error: 'invalid_device' }, 401, cors)
   }
+
+  await touchDevice(env, deviceId)
 
   const backlog = await env.DB.prepare('SELECT COUNT(*) AS n FROM outbox WHERE device_id = ?').bind(deviceId).first()
   if (backlog.n >= MAX_BACKLOG_PER_DEVICE) return json({ error: 'backlog_full' }, 429, cors)
@@ -196,6 +203,7 @@ async function handleDelete(request, env) {
   if (!device || !device.active || !timingSafeEqualHex(device.token_hash, await sha256Hex(token))) {
     return json({ error: 'invalid_device' }, 401, cors)
   }
+  await touchDevice(env, deviceId)
   const valid = ids.filter((i) => typeof i === 'string' && i.length <= 64 && i.startsWith(`${deviceId}-`))
   const now = Math.floor(Date.now() / 1000)
   const stmts = []
@@ -285,6 +293,7 @@ async function handleRosterGet(request, url, env) {
   if (!device || !device.active || !timingSafeEqualHex(device.token_hash, await sha256Hex(token))) {
     return json({ error: 'invalid_device' }, 401, cors)
   }
+  await touchDevice(env, deviceId)
   const obra = (device.obra || url.searchParams.get('obra') || '').trim()
   if (!obra) return json({ error: 'missing_obra' }, 400, cors)
 
@@ -294,6 +303,21 @@ async function handleRosterGet(request, url, env) {
 
   const { results } = await env.DB.prepare('SELECT sage_id, name FROM roster WHERE lower(trim(obra)) = lower(?) AND active = 1 ORDER BY name LIMIT ?').bind(obra, MAX_ROSTER_LIST).all()
   return json({ generatedAt, obra, workers: results.map((r) => ({ sageId: r.sage_id, name: r.name })) }, 200, cors)
+}
+
+// ------------------------------------------------------------------ Supabase → relay: estado dos relógios
+// Para cada dispositivo: se está ativo, a obra, o último contacto (segundos unix, ou null se nunca falou) e
+// quantas picagens estão no relay à espera do Supabase. `now` é a hora do relay, para quem lê não depender do
+// relógio do seu próprio computador.
+async function handleDevicesStatus(request, url, env) {
+  if (!(await verifySignature(request, url, '', env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  const { results } = await env.DB.prepare(
+    'SELECT d.id, d.active, d.obra, d.last_seen, (SELECT COUNT(*) FROM outbox o WHERE o.device_id = d.id) AS backlog FROM devices d ORDER BY d.id',
+  ).all()
+  return json({
+    now: Math.floor(Date.now() / 1000),
+    devices: results.map((r) => ({ id: r.id, active: r.active === 1, obra: r.obra, lastSeen: r.last_seen, backlog: r.backlog })),
+  })
 }
 
 export default {
@@ -308,6 +332,7 @@ export default {
     if (request.method === 'POST' && url.pathname === '/punch') return handlePunch(request, env)
     if (request.method === 'GET' && url.pathname === '/pull') return handlePull(request, url, env)
     if (request.method === 'POST' && url.pathname === '/ack') return handleAck(request, url, env)
+    if (request.method === 'GET' && url.pathname === '/devices-status') return handleDevicesStatus(request, url, env)
     if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true })
     return json({ error: 'not_found' }, 404)
   },

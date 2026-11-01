@@ -15,7 +15,11 @@ const BATCH = 200
 const MAX_BATCHES = 10 // por execução; o resto fica para a próxima
 const MAX_FUTURE_MS = 5 * 60 * 1000
 const MAX_PAST_MS = 14 * 24 * 3600 * 1000
-const unit = (v: unknown) => (typeof v === 'number' && v >= 0 && v <= 1 ? v : null) // 0..1 ou null
+const unit = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : null) // 0..1 ou null
+// Semelhança do reconhecimento: de -1 a 1 (a coluna é numeric(5,3); um valor fora do intervalo fazia falhar o lote inteiro). Fora disto vira null.
+const similarity = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= -1 && v <= 1 ? Math.round(v * 1000) / 1000 : null)
+// Erro da base por causa dos DADOS (classe 22 ou 23 do PostgreSQL: valor fora do intervalo, restrição violada) e não da rede ou das permissões.
+const isDataError = (e: { code?: string }) => /^2[23]/.test(e.code ?? '')
 
 const DIRECTIONS = ['in', 'out', 'meal_out', 'meal_in'] // entrada e saída da obra, e saída/entrada de almoço ou jantar (migração 010)
 
@@ -72,10 +76,14 @@ Deno.serve(async (req) => {
           typeof p?.eventId === 'string' &&
           typeof p?.deviceId === 'string' &&
           p.eventId.startsWith(`${p.deviceId}-`) &&
+          p.eventId.length <= 64 &&
+          p.deviceId.length <= 64 &&
           typeof p?.sageId === 'string' &&
           p.sageId.trim() !== '' &&
+          p.sageId.length <= 32 &&
           typeof p?.obra === 'string' &&
           p.obra.trim() !== '' &&
+          p.obra.length <= 64 &&
           DIRECTIONS.includes(p.direction) &&
           Number.isFinite(t) &&
           t - now < MAX_FUTURE_MS &&
@@ -91,7 +99,7 @@ Deno.serve(async (req) => {
           obra: p.obra.trim(),
           direction: p.direction,
           punched_at: new Date(t).toISOString(),
-          confidence: typeof p.confidence === 'number' ? p.confidence : null,
+          confidence: similarity(p.confidence),
           // dados para afinar o reconhecimento (colunas temporárias, migração 008)
           second_similarity: unit(p.second),
           antispoof_real: unit(p.real),
@@ -106,9 +114,24 @@ Deno.serve(async (req) => {
           .upsert(deviceIds.map((id) => ({ id, name: id })), { onConflict: 'id', ignoreDuplicates: true })
         if (devErr) throw new Error(`devices: ${devErr.message}`)
         // reenvios/duplicados do mesmo event_id são ignorados
-        const { error } = await supabase.from('timetrack').upsert(rows, { onConflict: 'event_id', ignoreDuplicates: true })
-        if (error) throw new Error(`timetrack: ${error.message}`)
-        stored += rows.length
+        const up = (r: Record<string, unknown>[]) => supabase.from('timetrack').upsert(r, { onConflict: 'event_id', ignoreDuplicates: true })
+        const { error } = await up(rows)
+        if (!error) {
+          stored += rows.length
+        } else if (!isDataError(error)) {
+          throw new Error(`timetrack: ${error.message}`) // rede, permissões...: as picagens ficam no relay e tenta-se na próxima execução
+        } else {
+          // A base recusou por causa dos dados: uma linha má não pode travar as picagens de todos os tablets. Tenta linha a linha e descarta
+          // só as más (contam em `dropped` e confirmam-se ao relay, para saírem de lá).
+          for (const r of rows) {
+            const { error: e } = await up([r])
+            if (!e) stored++
+            else if (isDataError(e)) {
+              dropped++
+              console.error('picagem descartada', r.event_id, e.code, e.message)
+            } else throw new Error(`timetrack: ${e.message}`)
+          }
+        }
       }
 
       // só confirmamos ao relay depois de gravado: se algo falhar, a picagem fica no relay

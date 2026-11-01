@@ -71,6 +71,9 @@ async function readBody(request) {
 
 // número entre 0 e 1, ou null
 const unit = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : null)
+// Semelhança do reconhecimento: de -1 a 1 (o cosseno do SFace pode ser negativo; o FaceRes vai de 0 a 1). Fora disto vira null e a picagem
+// segue: a coluna do Supabase é numeric(5,3) e um valor como 1000 fazia falhar o lote inteiro, parando a sincronização de todos os tablets.
+const similarity = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= -1 && v <= 1 ? Math.round(v * 1000) / 1000 : null)
 
 // A obra compara-se sem maiúsculas nem espaços nas pontas (como a intranet).
 const obraKey = (s) => String(s ?? '').trim().toLowerCase()
@@ -219,7 +222,7 @@ async function handlePunch(request, url, env) {
       obra: deviceObra,
       direction: p.direction,
       punchedAt: new Date(t).toISOString(),
-      confidence: typeof p.confidence === 'number' ? p.confidence : null,
+      confidence: similarity(p.confidence),
       // dados para afinar o reconhecimento; se vierem inválidos ficam a null (não rejeitam a picagem)
       second: unit(p.second),
       real: unit(p.real),

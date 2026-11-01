@@ -212,6 +212,17 @@ check('o token antigo já não autentica nada → 401', r.status === 401, String
 r = await fetch(`${RELAY}/punch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'x'.repeat(300000) })
 check('corpo acima do limite → 413 sem o ler (e sem autenticar)', r.status === 413, String(r.status))
 
+// a semelhança (confidence) fora de -1..1 ou não numérica não pode chegar ao Supabase (numeric(5,3) rebentava o lote inteiro): vira null e a picagem segue
+const cid = (n) => `${DEVICE}-${String(base + n).padStart(6, '0')}`
+r = await post({ deviceId: DEVICE, punches: [punch(base + 400, { confidence: 0.5 }), punch(base + 401, { confidence: 1000 }), punch(base + 402, { confidence: -0.4 }), punch(base + 403, { confidence: 'x' }), punch(base + 404, { confidence: -50 })] })
+j = await r.json()
+check('picagens com confidence inválida são aceites (não perdem a picagem)', r.status === 200 && j.accepted.length === 5 && j.rejected.length === 0, JSON.stringify(j))
+r = await signed('GET', '/pull?limit=100')
+j = await r.json()
+const conf = [400, 401, 402, 403, 404].map((n) => j.punches.find((p) => p.eventId === cid(n))?.confidence)
+check('confidence: 0.5 e -0.4 ficam; 1000, "x" e -50 chegam como null', JSON.stringify(conf) === '[0.5,null,-0.4,null,null]', JSON.stringify(conf))
+await signed('POST', '/ack', JSON.stringify({ eventIds: [400, 401, 402, 403, 404].map(cid) })) // limpeza
+
 // a biometria já não passa pelo relay: os pedidos que a transportavam deixaram de existir
 for (const [method, path] of [['POST', '/biometrics'], ['POST', '/bio-fetch'], ['POST', '/bio-delete'], ['POST', '/bio-deleted']]) {
   r = await dev.req(method, path, { deviceId: DEVICE })

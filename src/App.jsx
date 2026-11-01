@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import Kiosk from './views/Kiosk.jsx'
 import { SETUP_ID } from './views/Setup.jsx'
 import ScanClock from './views/ScanClock.jsx'
-import { loadSettings, saveSettings } from './lib/settings.js'
+import { loadSettings, saveSettings, missingFields } from './lib/settings.js'
 import { startAutoSync, syncRoster } from './lib/sync.js'
 import { listWorkers, hasUsableAdmin, isUsable, pendingPunches, dropWorkersCache } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
@@ -286,7 +286,7 @@ export default function App() {
           {settings.deviceName} · {online ? t('kiosk.online') : t('kiosk.offline')} · {t('kiosk.pendingSend', { n: pending })}
         </span>
       </header>
-      {hasAdmin === false && !admin && (
+      {hasAdmin === false && !admin && !missingFields(settings).length && ( // tablet novo (por configurar): sem avisos, só o botão Administração
         <p className="notice notice-warn" style={{ margin: '0 16px 8px' }}>
           {t('app.noAdmin')}
         </p>

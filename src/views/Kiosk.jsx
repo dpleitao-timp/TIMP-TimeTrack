@@ -35,6 +35,9 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
   const missing = missingFields(settings)
   const ready = hasAdmin === true && !missing.length
   const list = missing.map((k) => t(`settings.${k}`)).join(', ')
+  // Tablet por configurar e sem Administrador: nem se mostram os botões de entrada e saída (só o aviso e o acesso à configuração).
+  // Só com um dos dois a faltar, os botões aparecem desativados e o aviso diz o que falta.
+  const bare = hasAdmin !== true && missing.length > 0
   const [direction, setDirection] = useState(null) // null | 'in' | 'out' | 'meal_out' | 'meal_in'
   const [adminLogin, setAdminLogin] = useState(false)
   const [setup, setSetup] = useState(false) // sem Administrador: abrir a configuração com o código de instalação
@@ -79,7 +82,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
     <div className="kiosk-wrap">
       <div className="choice">
         {modelsState === 'loading' && <p className="muted preparing">⏳ {t('kiosk.preparing')}</p>}
-        {hasAdmin !== null && !ready && (
+        {hasAdmin !== null && !ready && !bare && (
           <div className="notice notice-warn">
             <strong>{t('kiosk.setupTitle')}</strong>
             {!hasAdmin && <div>{t('kiosk.setupNeedAdmin')}</div>}
@@ -88,7 +91,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
         )}
         {/* Uma só linha, por esta ordem: Entrada, Saída para almoço/jantar, Entrada de almoço/jantar, Saída. Cores: verde = entrada,
             vermelho = saída. Os botões têm todos o mesmo tamanho. Num tablet só de entradas ou só de saídas mostram-se os que se aplicam. */}
-        <div className={`choice-buttons ${settings.mealPunches ? 'has-meal' : ''}`}>
+        {!bare && <div className={`choice-buttons ${settings.mealPunches ? 'has-meal' : ''}`}>
           {settings.mode !== 'out' && (
             <button type="button" className="choice-btn in" disabled={!ready} onClick={() => setDirection('in')}>
               <IconIn size={ico} />
@@ -119,8 +122,8 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
               <span>{t('dir.out')}</span>
             </button>
           )}
-        </div>
-        {modelsError && <p className="notice notice-error">{t('kiosk.modelsFail', { err: modelsError })}</p>}
+        </div>}
+        {modelsError &&<p className="notice notice-error">{t('kiosk.modelsFail', { err: modelsError })}</p>}
         {hasAdmin !== null && (
           // com Administrador: reconhecimento facial; sem Administrador: código de instalação (a administração nunca fica aberta)
           <button type="button" className="btn btn-secondary choice-admin" onClick={() => (hasAdmin ? setAdminLogin(true) : setSetup(true))}>

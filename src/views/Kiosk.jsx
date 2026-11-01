@@ -98,8 +98,8 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
           {settings.mealPunches && settings.mode !== 'in' && (
             <button type="button" className="choice-btn meal-out" disabled={!ready} onClick={() => setDirection('meal_out')}>
               <span className="choice-icons">
-                <IconMeal size={ico} />
                 <IconOut size={ico} />
+                <IconMeal size={ico} />
               </span>
               <span>{t('dir.mealOut')}</span>
             </button>
@@ -326,8 +326,9 @@ function Scan({ settings, direction, onDone }) {
         <video ref={videoRef} muted playsInline className="mirror" />
         <div className="kiosk-top">
           <span className="dir">
-            {isMeal && <IconMeal size={26} />}
+            {isMeal && isArrival && <IconMeal size={26} />}
             {isArrival ? <IconIn size={26} /> : <IconOut size={26} />}
+            {isMeal && !isArrival && <IconMeal size={26} />}
             {t(dir.label).toLocaleUpperCase(locale)}
           </span>
           {settings.obra?.trim() && (
@@ -352,8 +353,9 @@ function Scan({ settings, direction, onDone }) {
               {choice.options.map((d) => (
                 <button key={d} type="button" className={`choice-btn ${DIRS[d].cls}`} onClick={() => pick(d)}>
                   <span className="choice-icons">
-                    {(d === 'meal_out' || d === 'meal_in') && <IconMeal size={36} />}
+                    {d === 'meal_in' && <IconMeal size={36} />}
                     {d === 'in' || d === 'meal_in' ? <IconIn size={36} /> : <IconOut size={36} />}
+                    {d === 'meal_out' && <IconMeal size={36} />}
                   </span>
                   <span>{t(DIRS[d].label)}</span>
                 </button>

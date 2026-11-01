@@ -45,7 +45,7 @@ Em `wrangler.jsonc`, trocar `ALLOWED_ORIGIN` pelo endereço da PWA. Teste local:
 Em Definições: URL do relay e o **código de instalação** (uso único, dado por `add-device.mjs`). Ao guardar, o tablet gera uma chave própria que não sai dele (ECDSA P-256, não exportável), regista a parte pública no relay e apaga o código; a partir daí assina cada pedido e já não há nenhum token guardado. Nada mais é preciso: o tablet nunca fala com o Supabase. Migração `relay/migrations/008_device_keys.sql`; os tablets das versões anteriores ligam-se sozinhos com o token que já têm, uma só vez.
 
 ### 4. Chefe de equipa
-Lê as picagens na app de timesheets/intranet, que consulta a tabela `timetrack` do Supabase (a policy `timetrack_select_authenticated`, criada na migração 001 com o nome antigo, dá acesso de leitura a utilizadores autenticados; convém restringi-la por obra/equipa).
+Lê as picagens na intranet (modal Time Tracker do Timesheets), que as consulta por funções no servidor (`security definer`, com autenticação forte e permissões por pessoa). **Ninguém lê nem altera a tabela `timetrack` diretamente**: a migração `013_timetrack_no_direct_access.sql` retirou o acesso a `anon` e `authenticated` (só a Edge Function `pull-punches`, com a service role, e essas funções lhe mexem).
 
 ## Arranque rápido
 Os modelos de reconhecimento (≈11 MB, em cache no service worker e na IndexedDB) carregam em segundo plano logo que a app abre, em qualquer ecrã, e a consola regista o tempo ("Modelos de reconhecimento prontos em … ms"). No ecrã de escolha aparece "A preparar o reconhecimento…" até estarem prontos.

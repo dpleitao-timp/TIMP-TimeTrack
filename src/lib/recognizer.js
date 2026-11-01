@@ -1,4 +1,4 @@
-import { rankMatches, meanEmbedding, livenessSignals } from './face.js'
+import { rankMatches, meanEmbedding, livenessSignals, usableWorkers } from './face.js'
 import { thresholdFor } from './settings.js'
 
 // Reconhecimento por janela deslizante de N fotogramas:
@@ -31,6 +31,7 @@ export function eyeOpenness(mesh) {
 const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0)
 
 export function createRecognizer(getSettings, workers) {
+  const pool = usableWorkers(workers) // a lista não muda durante uma leitura: filtra-se uma vez, não a cada fotograma
   let buffer = []
   let track = null // { id, count }
   let signals = { blink: false, turn: false }
@@ -113,7 +114,7 @@ export function createRecognizer(getSettings, workers) {
     }
 
     const thr = thresholdFor(s) // limiar do motor em uso
-    const ranked = rankMatches(meanEmbedding(buffer.map((b) => b.e)), workers)
+    const ranked = rankMatches(meanEmbedding(buffer.map((b) => b.e)), pool)
     const best = ranked[0]
     const second = ranked[1]
     info.similarity = best?.similarity ?? 0

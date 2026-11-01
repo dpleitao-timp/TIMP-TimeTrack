@@ -56,5 +56,5 @@ export default defineConfig({
       },
     }),
   ],
-  build: { chunkSizeWarningLimit: 2500 },
+  build: { chunkSizeWarningLimit: 1700 }, // o Human (~1,6 MB) é o único ficheiro grande e carrega à parte; o aviso apanha o resto a crescer
 })

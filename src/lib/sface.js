@@ -9,7 +9,6 @@ import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url'
 // O Cloudflare Workers só serve ficheiros até 25 MiB e o modelo tem 36,9 MiB: vai em duas partes (os bytes do ficheiro
 // original, cortados com `split -b 19500000`) que se juntam aqui. Para o refazer: `cat ...onnx.p00 ...onnx.p01 > ...onnx`.
 const MODEL_PARTS = ['/models/sface/face_recognition_sface_2021dec.onnx.p00', '/models/sface/face_recognition_sface_2021dec.onnx.p01']
-export const SFACE_DIM = 128
 const N = 112
 
 // Pontos de referência da ArcFace em 112x112: olho esquerdo e direito (como se vêem na imagem), nariz, cantos da boca.
@@ -63,14 +62,14 @@ export function loadSface() {
 // Os 5 pontos (olhos, nariz, boca) a partir da malha facial de 468 pontos do FaceMesh, em pixels da imagem.
 // 33 e 133: cantos do olho que fica à esquerda na imagem; 362 e 263: do que fica à direita; 1: ponta do nariz;
 // 61 e 291: cantos da boca.
-export function landmarks5(mesh) {
+function landmarks5(mesh) {
   const mid = (a, b) => [(mesh[a][0] + mesh[b][0]) / 2, (mesh[a][1] + mesh[b][1]) / 2]
   return [mid(33, 133), mid(362, 263), [mesh[1][0], mesh[1][1]], [mesh[61][0], mesh[61][1]], [mesh[291][0], mesh[291][1]]]
 }
 
 // Transformação de semelhança (rotação, escala e translação, sem espelho) que leva os pontos src para dst, por mínimos
 // quadrados: x' = a*x - b*y + tx ; y' = b*x + a*y + ty.
-export function similarityTransform(src, dst) {
+function similarityTransform(src, dst) {
   const n = src.length
   const mean = (pts, k) => pts.reduce((s, p) => s + p[k], 0) / n
   const mx = mean(src, 0)
@@ -94,22 +93,26 @@ export function similarityTransform(src, dst) {
   return { a, b, tx: dx - (a * mx - b * my), ty: dy - (b * mx + a * my) }
 }
 
-let canvas
+// O canvas e o buffer de entrada criam-se uma só vez e reutilizam-se a cada fotograma (mudar a largura/altura do canvas
+// realocava-o de cada vez). O buffer só é reescrito depois de a inferência anterior ter acabado (uma de cada vez).
+let ctx
+const out = new Float32Array(3 * N * N)
 // Recorta e alinha o rosto a 112x112 e devolve os pixels em RGB planar (NCHW), valores 0..255.
-export function alignedInput(source, mesh) {
+function alignedInput(source, mesh) {
   const t = similarityTransform(landmarks5(mesh), TEMPLATE)
-  canvas ??= document.createElement('canvas')
-  canvas.width = N
-  canvas.height = N
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) {
+    const canvas = document.createElement('canvas')
+    canvas.width = N
+    canvas.height = N
+    ctx = canvas.getContext('2d', { willReadFrequently: true })
+    ctx.imageSmoothingQuality = 'high'
+  }
   ctx.fillStyle = '#000'
   ctx.fillRect(0, 0, N, N)
-  ctx.imageSmoothingQuality = 'high'
   ctx.setTransform(t.a, t.b, -t.b, t.a, t.tx, t.ty) // canvas: x' = a*x + c*y + e ; y' = b*x + d*y + f
   ctx.drawImage(source, 0, 0)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   const d = ctx.getImageData(0, 0, N, N).data
-  const out = new Float32Array(3 * N * N)
   for (let i = 0; i < N * N; i++) {
     out[i] = d[i * 4]
     out[N * N + i] = d[i * 4 + 1]

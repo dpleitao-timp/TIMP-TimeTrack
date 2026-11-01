@@ -4,7 +4,6 @@ import { engineTag, thresholdFor, isBioConfigured } from '../lib/settings.js'
 import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin, isUsable, listRoster, rosterMeta } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
-import { faceLuma, saturation } from '../lib/diag.js'
 import { useT } from '../lib/i18n.jsx'
 
 // Passos de captura guiada. Cada passo exige uma pose; só o vetor (embedding) é guardado.
@@ -123,7 +122,7 @@ export default function Enrol({ settings, onRegistered }) {
     let frames = []
     while (run.active && i < steps.length) {
       const { face } = await detect(videoRef.current)
-      if (face) lightRef.current?.update(faceLuma(videoRef.current, face.box), { sat: saturation(videoRef.current) ?? 0 }) // a luz da cara decide a moldura
+      if (face) lightRef.current?.sample(videoRef.current, face.box) // a luz da cara decide a moldura
       const r = face?.rotation?.angle
       setLive(
         !face ? t('enrol.noFace') : !r ? t('enrol.noPose') : `yaw ${r.yaw.toFixed(2)} · pitch ${r.pitch.toFixed(2)} · score ${face.score.toFixed(2)} · ${frames.length}/${FRAMES}`,

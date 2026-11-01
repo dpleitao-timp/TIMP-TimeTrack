@@ -3,7 +3,6 @@ import { initHuman, detect } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { listWorkers } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
-import { faceLuma, saturation } from '../lib/diag.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
 import { BAD_SHOW_MS, isAlive } from '../lib/scanrules.js'
 import { useT } from '../lib/i18n.jsx'
@@ -51,7 +50,7 @@ export default function AdminLogin({ settings, onUnlock, onCancel }) {
           const { face, gestures } = await detect(videoRef.current)
           if (stop) return
           const r = recognizer.push(face, gestures)
-          if (face) light.update(faceLuma(videoRef.current, face.box), { sat: saturation(videoRef.current) ?? 0 })
+          if (face) light.sample(videoRef.current, face.box)
           if (r.status === 'hold') return requestAnimationFrame(loop) // falha momentânea do detetor: não mexe no ecrã
           if (r.status === 'none') {
             show({ kind: 'idle', text: t('kiosk.approach') })

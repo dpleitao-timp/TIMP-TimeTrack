@@ -1,20 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import Kiosk from './views/Kiosk.jsx'
 import ScanClock from './views/ScanClock.jsx'
-import Enrol from './views/Enrol.jsx'
-import Punches from './views/Punches.jsx'
-import Settings from './views/Settings.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync, syncRoster } from './lib/sync.js'
 import { fetchMissingBiometrics, applyBioTombstones } from './lib/bio.js'
-import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.js'
+import { listWorkers, hasUsableAdmin, isUsable, pendingPunches, dropWorkersCache } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
 import { warmCamera, releaseCamera, acquireCamera } from './lib/useCamera.js'
 import { WAKE_MS } from './lib/schedule.js'
 import { applyOrientation } from './lib/orientation.js'
 
-// Só o Administrador acede a estes separadores.
+// Só o Administrador acede a estes separadores. Os ecrãs carregam-se à parte, quando se abrem: quem pica não os usa, e assim o
+// arranque não lê nem compila o código deles (o service worker já os tem guardados, por isso abrem sem rede).
+const Enrol = lazy(() => import('./views/Enrol.jsx'))
+const Punches = lazy(() => import('./views/Punches.jsx'))
+const Settings = lazy(() => import('./views/Settings.jsx'))
 const ADMIN_TABS = ['enrol', 'punches', 'settings']
 const ADMIN_IDLE_MS = 5 * 60 * 1000 // a sessão de administrador termina sem atividade
 
@@ -108,6 +109,7 @@ export default function App() {
   useEffect(() => {
     if (asleep) {
       releaseCamera()
+      dropWorkersCache() // os vetores decifrados não ficam em memória com o tablet em repouso
       setAdmin(null)
       location.hash = '#/kiosk'
     } else {
@@ -198,12 +200,12 @@ export default function App() {
     }
   }, [])
 
-  // contador de picagens por enviar, sempre visível no cabeçalho
+  // contador de picagens por enviar, sempre visível no cabeçalho: lê-se ao arrancar e sempre que a fila muda (db.js avisa)
   useEffect(() => {
     const load = () => pendingPunches().then((p) => setPending(p.length))
     load()
-    const timer = setInterval(load, 5000)
-    return () => clearInterval(timer)
+    window.addEventListener('queue-changed', load)
+    return () => window.removeEventListener('queue-changed', load)
   }, [])
 
   // Sem Administrador registado (primeiro arranque) a administração está aberta, para registar o primeiro.
@@ -292,11 +294,13 @@ export default function App() {
         v{__APP_VERSION__} · {__APP_BUILD__} · {__APP_DATE__}
       </div>
       {current === 'kiosk' && (
-        <Kiosk settings={settings} setPending={setPending} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
+        <Kiosk settings={settings} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
       )}
-      {current === 'enrol' && <Enrol settings={settings} onRegistered={onRegistered} />}
-      {current === 'punches' && <Punches />}
-      {current === 'settings' && <Settings settings={settings} onChange={update} />}
+      <Suspense fallback={null}>
+        {current === 'enrol' && <Enrol settings={settings} onRegistered={onRegistered} />}
+        {current === 'punches' && <Punches />}
+        {current === 'settings' && <Settings settings={settings} onChange={update} />}
+      </Suspense>
     </>
   )
 }

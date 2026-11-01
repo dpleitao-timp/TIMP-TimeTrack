@@ -50,6 +50,16 @@ async function decrypt({ iv, data }) {
 }
 
 // --- Trabalhadores ---
+// Os vetores decifram-se uma só vez e ficam em memória: cada leitura, cada início de sessão de administrador e cada alteração à lista
+// voltavam a decifrar todos os vetores de todos os trabalhadores (centenas de operações AES-GCM). A cache esvazia-se a cada escrita
+// (abaixo) e quando o tablet adormece (App.jsx), por isso os vetores decifrados não ficam em memória enquanto ninguém usa o tablet.
+let workersCache = null // { tag, promise }
+export const dropWorkersCache = () => {
+  workersCache = null
+}
+// Pode haver registos com a biometria por enviar ao relay? Evita reler (e clonar) todos os registos a cada 20 s só para ver que não há.
+let unsentMayExist = true
+
 // role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador.
 // rev: instante da última gravação da biometria. bioSent: a biometria já foi enviada ao relay (ou veio de lá); só se envia o que
 // ainda não foi. Os registos que chegam do relay entram com bioSent verdadeiro e sempre como 'user'.
@@ -57,6 +67,8 @@ export async function saveWorker({ id, name, embeddings, role = 'user', createdA
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
   await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? engineTag(), rev: Date.now(), bioSent })
+  dropWorkersCache()
+  if (!bioSent) unsentMayExist = true
 }
 
 // Lê um registo da base: decifra os vetores. Os que não decifram (ex.: criados com a chave errada) ficam sem vetores e
@@ -81,13 +93,24 @@ async function readRow(w, current, oldest) {
   }
 }
 
-export async function listWorkers() {
+export function listWorkers() {
+  const tag = engineTag()
+  if (workersCache?.tag !== tag) {
+    const promise = readWorkers(tag).catch((e) => {
+      if (workersCache?.promise === promise) workersCache = null
+      throw e
+    })
+    workersCache = { tag, promise }
+  }
+  return workersCache.promise
+}
+
+async function readWorkers(current) {
   const d = await db()
   const rows = await d.getAll('workers')
   // Registos anteriores à existência de perfis (sem campo `role`): se não há Administrador, o mais antigo deles passa a
   // Administrador. Só conta quem não tem `role` gravado: os que chegam do relay entram como 'user' de propósito.
   const oldest = rows.length && !rows.some((w) => w.role === 'admin') ? ([...rows].filter((w) => w.role == null).sort((x, y) => x.createdAt - y.createdAt)[0]?.id ?? null) : null
-  const current = engineTag()
   return Promise.all(rows.map((w) => readRow(w, current, oldest)))
 }
 
@@ -99,9 +122,11 @@ export async function listWorkerHeads() {
 
 // Registos utilizáveis (motor atual, legíveis) cuja biometria ainda não foi enviada ao relay.
 export async function listUnsentWorkers() {
+  if (!unsentMayExist) return []
   const d = await db()
   const current = engineTag()
   const rows = (await d.getAll('workers')).filter((w) => w.bioSent !== true && (w.engine ?? 'faceres') === current)
+  unsentMayExist = rows.length > 0 // se não há nenhum por enviar, só um registo novo (saveWorker) volta a ligar isto
   const out = await Promise.all(rows.map((w) => readRow(w, current, null)))
   return out.filter((w) => !w.broken && w.embeddings.length)
 }
@@ -113,6 +138,7 @@ export async function markBioSent(id, rev) {
   const w = await tx.store.get(id)
   if (w && w.rev === rev) await tx.store.put({ ...w, bioSent: true })
   await tx.done
+  dropWorkersCache()
 }
 
 // Só existe administração protegida se houver um Administrador utilizável (vetores legíveis e do motor atual).
@@ -165,6 +191,7 @@ export async function setWorkerRole(id, role) {
   if (role !== 'admin') await assertNotLastAdmin(id)
   // grava também o perfil dos registos antigos (sem campo `role`), para a regra do "mais antigo" não voltar a atuar
   await d.put('workers', { ...w, role })
+  dropWorkersCache()
 }
 
 // propagate: o apagar tem de chegar a todos os tablets e ao Supabase (fila `bioDelQueue`, enviada por bio.js). Fica a falso
@@ -173,11 +200,12 @@ export async function deleteWorker(id, { propagate = true } = {}) {
   await assertNotLastAdmin(id, { allowIfOnlyWorker: true })
   const d = await db()
   await d.delete('workers', id)
+  dropWorkersCache()
   if (propagate) await queueBioDeletion(id)
 }
 
 // --- Apagar biometria em todos os tablets: fila de pedidos por enviar, lápides já vistas e versão da lista do relay ---
-export async function queueBioDeletion(id, at = Date.now()) {
+async function queueBioDeletion(id, at = Date.now()) {
   const d = await db()
   const q = (await d.get('meta', 'bioDelQueue')) || []
   await d.put('meta', [...q.filter((x) => x.sageId !== id), { sageId: id, at }], 'bioDelQueue')
@@ -228,6 +256,8 @@ export async function setClockOffset(ms) {
 }
 
 // --- Fila de picagens ---
+// Avisa a interface (contador do cabeçalho, lista de Picagens) de que a fila mudou, em vez de ela a reler de x em x segundos.
+const queueChanged = () => window.dispatchEvent(new Event('queue-changed'))
 const round3 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null)
 // eventId = dispositivo + contador => reenvios idempotentes no servidor.
 export async function enqueuePunch({ deviceId, direction, sageId, workerName, obra, confidence, second = null, real = null, live = null }) {
@@ -251,6 +281,7 @@ export async function enqueuePunch({ deviceId, direction, sageId, workerName, ob
     attempts: 0,
   }
   await d.put('queue', punch)
+  queueChanged()
   return punch
 }
 
@@ -277,6 +308,7 @@ export async function deletePunch(eventId) {
   if (row.synced) await tx.store.put({ ...row, voided: true })
   else await tx.store.delete(eventId)
   await tx.done
+  queueChanged()
   return row
 }
 
@@ -297,44 +329,46 @@ export async function clearVoids(eventIds) {
   await tx.done
 }
 
-// Milissegundos desde a última picagem deste trabalhador neste tablet (Infinity se não houver).
-// Lê a fila guardada na IndexedDB, por isso sobrevive a recargas, atualizações e reinícios (o intervalo mínimo
-// entre picagens não pode depender de memória). Picagens recusadas pelo relay não contam; as apagadas também não.
-export async function msSinceLastPunch(sageId) {
-  const queue = await listQueue() // já vem da mais recente para a mais antiga
-  const last = queue.find((p) => (p.sageId ?? p.workerId) === sageId && !p.rejected)
-  if (!last) return Infinity
-  const now = Date.now() + (await getClockOffset()) // mesma hora usada ao gravar a picagem
-  return Math.max(0, now - new Date(last.punchedAt).getTime())
-}
-
 // O "dia" de trabalho acaba às 05:00 da manhã (para acomodar o turno da noite): uma picagem às 02:00 conta para o dia anterior e o dia novo
 // começa às 05:00. Por agora é fixo.
-export const DAY_STARTS_AT_HOUR = 5
+const DAY_STARTS_AT_HOUR = 5
 
-// Tipos de picagem que este trabalhador já tem NO DIA DE TRABALHO ATUAL neste tablet (o dia vai das 05:00 às 05:00 do dia seguinte,
-// no fuso do tablet, com a hora corrigida pelo servidor, como a que se grava na picagem). Contam as que estão na fila (as apagadas e as
-// recusadas pelo relay não). Só vê o que se picou neste tablet.
-export async function directionsToday(sageId) {
-  const offset = await getClockOffset()
+// Picagens deste trabalhador neste tablet, numa só leitura da fila. Lê a fila guardada na IndexedDB, por isso sobrevive a recargas,
+// atualizações e reinícios (o intervalo mínimo entre picagens não pode depender de memória). Picagens recusadas pelo relay não contam;
+// as apagadas também não.
+//  - msSince: milissegundos desde a última (Infinity se não houver), com a mesma hora usada ao gravar a picagem;
+//  - directions: tipos de picagem que já tem NO DIA DE TRABALHO ATUAL (das 05:00 às 05:00 do dia seguinte, no fuso do tablet, com a hora
+//    corrigida pelo servidor). Só vê o que se picou neste tablet.
+export async function punchStatus(sageId) {
+  const d = await db()
+  const [rows, offset] = await Promise.all([d.getAll('queue'), getClockOffset()])
   const key = (t) => {
     const x = new Date(new Date(t).getTime() - DAY_STARTS_AT_HOUR * 36e5) // recua 5 h: assim 00:00 a 04:59 pertencem ao dia anterior
     return `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`
   }
-  const today = key(Date.now() + offset)
-  const mine = (await listQueue()).filter((p) => (p.sageId ?? p.workerId) === sageId && !p.rejected && key(p.punchedAt) === today)
-  return new Set(mine.map((p) => p.direction))
+  const now = Date.now() + offset
+  const today = key(now)
+  const directions = new Set()
+  let last = ''
+  for (const p of rows) {
+    if (p.voided || p.rejected || (p.sageId ?? p.workerId) !== sageId) continue
+    if (p.punchedAt > last) last = p.punchedAt // ISO: a ordem das cadeias é a do tempo
+    if (key(p.punchedAt) === today) directions.add(p.direction)
+  }
+  return { msSince: last ? Math.max(0, now - new Date(last).getTime()) : Infinity, directions }
 }
 
 export async function listQueue() {
   const d = await db()
-  const all = (await d.getAll('queue')).filter((p) => !p.voided) // as apagadas já não contam (nem para o intervalo mínimo)
-  return all.sort((a, b) => b.punchedAt.localeCompare(a.punchedAt))
+  const all = (await d.getAll('queue')).filter((p) => !p.voided) // as apagadas já não contam
+  return all.sort((a, b) => (a.punchedAt < b.punchedAt ? 1 : -1)) // da mais recente para a mais antiga (ISO: a ordem das cadeias é a do tempo)
 }
 
-// Por enviar: nem enviadas nem recusadas (uma recusada não volta a ser enviada)
+// Por enviar: nem enviadas nem recusadas (uma recusada não volta a ser enviada). Da mais antiga para a mais recente.
 export async function pendingPunches() {
-  return (await listQueue()).filter((p) => !p.synced && !p.rejected).reverse()
+  const d = await db()
+  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided)
+  return rows.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))
 }
 
 // O relay recusou estas picagens (dados inválidos): ficam marcadas e visíveis, nunca como enviadas.
@@ -346,6 +380,7 @@ export async function markRejected(eventIds) {
     if (row && !row.synced) await tx.store.put({ ...row, rejected: true })
   }
   await tx.done
+  queueChanged()
 }
 
 export async function markSynced(eventIds) {
@@ -356,6 +391,7 @@ export async function markSynced(eventIds) {
     if (row) await tx.store.put({ ...row, synced: 1 })
   }
   await tx.done
+  queueChanged()
 }
 
 export async function bumpAttempts(eventIds) {
@@ -368,8 +404,11 @@ export async function bumpAttempts(eventIds) {
   await tx.done
 }
 
-// Remove picagens já sincronizadas com mais de N dias.
+// Remove picagens já sincronizadas com mais de N dias. Corre no máximo uma vez por hora (lê a fila inteira).
+let lastPrune = 0
 export async function pruneSynced(days = 7) {
+  if (Date.now() - lastPrune < 36e5) return
+  lastPrune = Date.now()
   const d = await db()
   const limit = new Date(Date.now() - days * 864e5).toISOString()
   const tx = d.transaction('queue', 'readwrite')

@@ -24,10 +24,11 @@ export default function Punches() {
     setRows(all.filter((p) => localIso(p.punchedAt) === date))
   }, [date])
 
+  // lê ao abrir e sempre que a fila muda (nova picagem, enviada, recusada ou apagada): sem consultas periódicas
   useEffect(() => {
     load()
-    const timer = setInterval(load, 10000)
-    return () => clearInterval(timer)
+    window.addEventListener('queue-changed', load)
+    return () => window.removeEventListener('queue-changed', load)
   }, [load])
 
   async function remove(p) {

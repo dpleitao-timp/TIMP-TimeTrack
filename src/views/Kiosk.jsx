@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, backendName } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
-import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch, directionsToday } from '../lib/db.js'
+import { listWorkers, enqueuePunch, punchStatus } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
-import { diagStart, diagPush, videoInfo, faceLuma, faceNoise, saturation } from '../lib/diag.js'
+import { diagStart, diagPush, videoInfo, faceNoise } from '../lib/diag.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
 import { BAD_SHOW_MS, isAlive, allowedDirections } from '../lib/scanrules.js'
 import { useT } from '../lib/i18n.jsx'
@@ -27,7 +27,7 @@ const DIRS = {
 }
 
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
-export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending }) {
+export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
   const { t } = useT()
   const [direction, setDirection] = useState(null) // null | 'in' | 'out' | 'meal_out' | 'meal_in'
   const [adminLogin, setAdminLogin] = useState(false)
@@ -59,7 +59,6 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
         key={direction}
         settings={settings}
         direction={direction}
-        setPending={setPending}
         onDone={() => setDirection(null)}
       />
     )
@@ -110,13 +109,13 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
             {t('kiosk.admin')}
           </button>
         )}
-        <ScanClock className="choice-clock" /> {/* data e hora sempre visíveis no canto inferior direito */}
+        <ScanClock className="choice-clock" /> {/* data e hora sempre visíveis no canto inferior esquerdo */}
       </div>
     </div>
   )
 }
 
-function Scan({ settings, direction, setPending, onDone }) {
+function Scan({ settings, direction, onDone }) {
   const { t, locale } = useT()
   const videoRef = useRef(null)
   const kioskRef = useRef(null)
@@ -201,8 +200,7 @@ function Scan({ settings, direction, setPending, onDone }) {
           text: t('kiosk.hello', { name: worker.name }),
           sub: `${t((DIRS[d] ?? DIRS.in).label)} ${fmtTime(punch.punchedAt, locale)}`,
         })
-        setPending((await pendingPunches()).length)
-        flushQueue(s).then((res) => setPending(res.pending))
+        flushQueue(s) // o contador do cabeçalho acompanha a fila sozinho (evento queue-changed)
         recognizer.reset()
         pauseUntil = performance.now() + 3500
         // registado: a câmara desliga e volta ao ecrã de escolha
@@ -222,9 +220,11 @@ function Scan({ settings, direction, setPending, onDone }) {
           if (stop) return
           const r = recognizer.push(face, gestures)
           setDebug(s.debug ? { ...r, detMs } : null)
-          const sat = face ? saturation(videoRef.current) : null // fundo estourado: a moldura não cresce mais
-          if (face) light.update(faceLuma(videoRef.current, face.box), { sat: sat ?? 0 }) // a luz da cara decide a espessura da moldura
-          if (s.debug) diagPush({ detMs, why, face: raw, r, trace: recognizer.trace(), video: videoInfo(videoRef.current), light: light.state(), noise: face ? faceNoise(videoRef.current, face.box) : null, sat })
+          if (face) light.sample(videoRef.current, face.box) // a luz da cara decide a espessura da moldura (e a imagem estourada trava-a)
+          if (s.debug) {
+            const ls = light.state()
+            diagPush({ detMs, why, face: raw, r, trace: recognizer.trace(), video: videoInfo(videoRef.current), light: ls, noise: face ? faceNoise(videoRef.current, face.box) : null, sat: ls.sat })
+          }
           if (r.status === 'hold') return requestAnimationFrame(loop) // falha momentânea do detetor: não mexe no ecrã
           if (r.status === 'none') {
             setBanner((b) => (b.kind === 'ok' || (b.kind === 'idle' && b.text === t('kiosk.approach')) ? b : { kind: 'idle', text: t('kiosk.approach') }))
@@ -262,7 +262,8 @@ function Scan({ settings, direction, setPending, onDone }) {
             show({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
             return requestAnimationFrame(loop)
           }
-          const waitMs = Number(s.cooldownSec) * 1000 - (await msSinceLastPunch(worker.id))
+          const { msSince, directions: taken } = await punchStatus(worker.id) // uma só leitura da fila
+          const waitMs = Number(s.cooldownSec) * 1000 - msSince
           if (waitMs > 0) {
             show({ kind: 'warn', text: t('kiosk.alreadyWait', { name: worker.name, min: Math.ceil(waitMs / 60000) }) })
             pauseUntil = performance.now() + 2500
@@ -270,7 +271,6 @@ function Scan({ settings, direction, setPending, onDone }) {
             return requestAnimationFrame(loop)
           }
           // Já tem este tipo de movimento hoje? Pergunta qual o movimento, só com os que ainda não tem.
-          const taken = await directionsToday(worker.id)
           if (taken.has(direction)) {
             const options = allowedDirections(s).filter((d) => !taken.has(d))
             recognizer.reset()
@@ -300,7 +300,7 @@ function Scan({ settings, direction, setPending, onDone }) {
       timers.forEach(clearTimeout)
       clearTimeout(choiceTimer.current)
     }
-  }, [ready, direction, setPending])
+  }, [ready, direction])
 
   return (
     <div className="kiosk-wrap">

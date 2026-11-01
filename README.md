@@ -48,7 +48,7 @@ Em Definições: URL do relay e token do dispositivo. Nada mais é preciso: o ta
 Lê as picagens na app de timesheets/intranet, que consulta a tabela `timetrack` do Supabase (a policy `timetrack_select_authenticated`, criada na migração 001 com o nome antigo, dá acesso de leitura a utilizadores autenticados; convém restringi-la por obra/equipa).
 
 ## Arranque rápido
-Os modelos de reconhecimento (≈13 MB, em cache no service worker e na IndexedDB) carregam em segundo plano logo que a app abre, em qualquer ecrã, e a consola regista o tempo ("Modelos de reconhecimento prontos em … ms"). No ecrã de escolha aparece "A preparar o reconhecimento…" até estarem prontos.
+Os modelos de reconhecimento (≈11 MB, em cache no service worker e na IndexedDB) carregam em segundo plano logo que a app abre, em qualquer ecrã, e a consola regista o tempo ("Modelos de reconhecimento prontos em … ms"). No ecrã de escolha aparece "A preparar o reconhecimento…" até estarem prontos.
 
 **Câmara sempre ligada:** a câmara abre-se no arranque e fica aberta (partilhada entre os ecrãs), por isso escolher Entrada/Saída já a encontra pronta. Só passa a ser analisada depois dessa escolha e, enquanto não se escolhe, não se mostra nem se processa nenhuma imagem (a luz da câmara fica acesa). Isto substitui a regra anterior "a câmara só liga depois de escolher" e deve constar da avaliação de impacto (DPIA).
 

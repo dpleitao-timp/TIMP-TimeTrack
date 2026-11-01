@@ -1,4 +1,3 @@
-import Human from '@vladmandic/human'
 import { loadSettings, currentEngine } from './settings.js'
 import { embedSface, loadSface, cosine } from './sface.js'
 
@@ -49,6 +48,8 @@ export function initHuman(onStatus) {
   loadPromise ??= (async () => {
     const t0 = performance.now()
     activeEngine = currentEngine()
+    // O Human (~1,4 MB) carrega à parte: a interface desenha-se e fica utilizável antes de ele ser lido e compilado.
+    const { default: Human } = await import('@vladmandic/human')
     const h = new Human(buildConfig())
     await h.load()
     await h.warmup()
@@ -65,7 +66,6 @@ export function initHuman(onStatus) {
   return loadPromise
 }
 
-export const getHuman = () => human
 export const backendName = () => human?.tf?.getBackend?.() ?? '-'
 export const engineName = () => activeEngine
 
@@ -95,11 +95,12 @@ export const similarity = (a, b) => (activeEngine === 'sface' ? cosine(a, b) : h
 
 // Trabalhadores registados com outro motor (ou ilegíveis) não participam no reconhecimento.
 const usable = (w) => !w.stale && !w.broken && w.embeddings.length
+export const usableWorkers = (workers) => workers.filter(usable)
 
 // Melhor correspondência contra a lista de trabalhadores.
 export function bestMatch(embedding, workers) {
   let best = { worker: null, similarity: 0 }
-  for (const w of workers.filter(usable)) {
+  for (const w of usableWorkers(workers)) {
     for (const e of w.embeddings) {
       const s = similarity(embedding, e)
       if (s > best.similarity) best = { worker: w, similarity: s }
@@ -108,10 +109,11 @@ export function bestMatch(embedding, workers) {
   return best
 }
 
-// Pontuação por trabalhador (a melhor entre os seus vetores), da mais alta para a mais baixa.
-export function rankMatches(embedding, workers) {
+// Pontuação por trabalhador (a melhor entre os seus vetores), da mais alta para a mais baixa. `pool`: só os utilizáveis
+// (ver usableWorkers); quem chama a cada fotograma filtra uma vez e não de cada vez.
+export function rankMatches(embedding, pool) {
   const scores = []
-  for (const w of workers.filter(usable)) {
+  for (const w of pool) {
     let best = 0
     for (const e of w.embeddings) best = Math.max(best, similarity(embedding, e))
     scores.push({ worker: w, similarity: best })
@@ -131,10 +133,4 @@ export function livenessSignals(gestures) {
   const blink = gestures.some((g) => g.includes('blink'))
   const turn = gestures.some((g) => g.includes('facing left') || g.includes('facing right'))
   return { blink, turn }
-}
-
-// Qualidade mínima do rosto (tamanho, antispoof/liveness do próprio modelo).
-export function faceQuality(face) {
-  const ok = (face.real ?? 1) > 0.5 && (face.live ?? 1) > 0.5
-  return { ok, real: face.real, live: face.live }
 }

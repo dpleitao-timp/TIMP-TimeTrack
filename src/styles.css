@@ -120,7 +120,6 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   padding: calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px;
   flex-shrink: 0;
 }
-.app-title { margin: 0; font-size: 1.2rem; }
 .tabs { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
 .tab {
   display: inline-flex;
@@ -196,7 +195,6 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .btn-block { display: block; width: 100%; margin-top: 12px; }
 .btn-small { min-height: 40px; padding: 0 14px; font-size: 0.9rem; border-radius: 12px; }
 .link-button { background: none; border: 0; padding: 0; color: var(--link); font-weight: 600; font-size: inherit; text-decoration: underline; }
-.btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Botões quadrados só com ícone (lista de trabalhadores) */
 .row-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .icon-slot { width: 44px; height: 44px; flex: none; }
@@ -255,9 +253,6 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 
 /* ---------------------------------------------------------------- segmented / toolbar */
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 6px; border-radius: var(--radius); background: var(--card-bg); box-shadow: var(--shadow); }
-.seg { display: flex; gap: 4px; }
-.seg button { min-height: 40px; padding: 0 14px; border: 0; border-radius: 12px; background: none; color: var(--text-muted); font-weight: 600; font-size: 0.9rem; }
-.seg button.on { background: var(--accent); color: var(--accent-contrast); }
 
 /* ---------------------------------------------------------------- cards de trabalhador */
 .worker-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
@@ -307,17 +302,16 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 /* Moldura branca: à noite o ecrã é a principal luz sobre o rosto, e um ecrã de leitura escuro deixava a imagem subexposta. */
 .kiosk { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-lg); background: #000; box-shadow: var(--shadow); --light-frame: 3vmin; }
 /* Moldura branca por cima do vídeo (não mexe no tamanho da imagem). A espessura é ajustada pela luz da cara (lightframe.js). */
-.kiosk::after { content: ''; position: absolute; inset: 0; z-index: 1; border: var(--light-frame) solid #fff; border-radius: inherit; pointer-events: none; transition: border-width 0.6s ease; }
+.kiosk::after { content: ''; position: absolute; inset: 0; z-index: 1; border: solid #fff; border-width: var(--light-frame) min(var(--light-frame-x, var(--light-frame)), 22vw); border-radius: inherit; pointer-events: none; transition: border-width 0.6s ease; }
 /* Laterais mais largas (a espessura vem de lightframe.js; no máximo 22% da largura de cada lado). Em ecrã vertical, igual em todos os lados. */
-.kiosk::after { border-width: var(--light-frame) min(var(--light-frame-x, var(--light-frame)), 22vw); }
 @media (orientation: portrait) { .kiosk::after { border-width: var(--light-frame); } }
 .kiosk .kiosk-top, .kiosk .banner, .kiosk .scan-clock, .kiosk .debug { z-index: 2; }
 /* Vídeo sempre ligado à câmara (ver CameraKeepAlive em App.jsx): minúsculo e quase invisível, mas desenhado. */
 .camera-keepalive { position: fixed; right: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }
 .kiosk-dock { display: flex; align-items: center; justify-content: center; gap: 12px; flex-shrink: 0; }
-.choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 60px; text-align: center; }
-/* Data e hora do ecrã inicial: canto inferior direito, por cima da linha pequena da versão (que é fixa em baixo à direita) */
-.choice .choice-clock { position: absolute; right: 2px; bottom: 24px; padding: 6px 14px; border-radius: 99px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.95rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; box-shadow: var(--shadow); }
+.choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 56px; text-align: center; }
+/* Data e hora do ecrã inicial: canto inferior esquerdo (a linha pequena da versão é que está em baixo à direita), como no ecrã de leitura */
+.choice .choice-clock { position: absolute; left: 12px; bottom: 12px; padding: 6px 14px; border-radius: 99px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.95rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; box-shadow: var(--shadow); }
 .choice-buttons { display: flex; gap: 18px; width: 100%; max-width: 720px; margin-top: 18px; }
 .choice-btn { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 170px; border: 0; border-radius: var(--radius-lg); color: #fff; font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25); }
 .choice-btn.in { background: var(--ok); }
@@ -420,7 +414,6 @@ body::before {
   .enrol, .settings-grid { grid-template-columns: 1fr; }
   .enrol { grid-template-rows: none; }
   .enrol-cam, .enrol-form, .enrol-registered { grid-column: auto; grid-row: auto; }
-  .app-title { display: none; }
   /* ecrã estreito: os separadores ocupam a primeira linha; idioma e estado passam para a seguinte (antes saíam do ecrã) */
   .app-header { flex-wrap: wrap; }
   .tabs { flex: 1 1 100%; }

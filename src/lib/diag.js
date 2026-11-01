@@ -59,8 +59,30 @@ export function diagPush({ detMs, why, face, r, trace, video, light, noise, sat 
   }
 }
 
+// Telas pequenas de medição: criam-se uma vez por tamanho e reutilizam-se (mudar a largura/altura de um canvas realoca-o, e estas
+// medições correm a cada fotograma). willReadFrequently mantém-nas na memória do processador, que é onde se lê.
+const probes = new Map()
+function probe(w, h) {
+  const key = `${w}x${h}`
+  let c = probes.get(key)
+  if (!c) {
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    c = canvas.getContext('2d', { willReadFrequently: true })
+    probes.set(key, c)
+  }
+  return c
+}
+
+// Luminosidade média (0-255) dos pixels RGBA lidos de uma tela.
+function meanLuma(d) {
+  let sum = 0
+  for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+  return sum / (d.length / 4)
+}
+
 // Estado do vídeo e luminosidade média (0-255): ajuda a ver se a imagem estava escura/estourada ou o vídeo ainda não corria.
-let probe
 let camTrack = null // faixa de vídeo em uso (para ler as capacidades da câmara)
 export function videoInfo(v) {
   if (!v) return { w: 0, h: 0, rs: -1, lum: '-' }
@@ -73,14 +95,9 @@ export function videoInfo(v) {
     /* sem faixa */
   }
   try {
-    probe ??= document.createElement('canvas')
-    probe.width = probe.height = 16
-    const c = probe.getContext('2d', { willReadFrequently: true })
+    const c = probe(16, 16)
     c.drawImage(v, 0, 0, 16, 16)
-    const d = c.getImageData(0, 0, 16, 16).data
-    let sum = 0
-    for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
-    lum = Math.round(sum / (d.length / 4))
+    lum = Math.round(meanLuma(c.getImageData(0, 0, 16, 16).data))
   } catch {
     /* vídeo sem imagem ainda */
   }
@@ -97,20 +114,14 @@ export function videoInfo(v) {
 }
 
 // Luminosidade média (0-255) da zona central da cara (60% da caixa, sem cabelo nem fundo).
-let faceProbe
 export function faceLuma(v, box) {
   if (!v || !box || box.length < 4 || !v.videoWidth) return null
   try {
     const [x, y, w, h] = box
     if (!(w > 8 && h > 8)) return null
-    faceProbe ??= document.createElement('canvas')
-    faceProbe.width = faceProbe.height = 16
-    const c = faceProbe.getContext('2d', { willReadFrequently: true })
+    const c = probe(16, 16)
     c.drawImage(v, x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6, 0, 0, 16, 16)
-    const d = c.getImageData(0, 0, 16, 16).data
-    let sum = 0
-    for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
-    return sum / (d.length / 4)
+    return meanLuma(c.getImageData(0, 0, 16, 16).data)
   } catch {
     return null
   }
@@ -120,7 +131,6 @@ export function faceLuma(v, box) {
 // bochechas, sem escalar), em percentagem da luminosidade média dessa janela. É relativo à luz de propósito: em valor
 // absoluto o ruído sobe só porque a imagem ficou mais clara. Em pele lisa quase só sobra o ruído do sensor. Mais alto =
 // mais ruído por unidade de luz.
-let noiseProbe
 export function faceNoise(v, box) {
   const vw = v?.videoWidth || v?.width
   const vh = v?.videoHeight || v?.height
@@ -131,9 +141,7 @@ export function faceNoise(v, box) {
     const N = 64
     const sx = Math.max(0, Math.min(vw - N, Math.round(x + w / 2 - N / 2)))
     const sy = Math.max(0, Math.min(vh - N, Math.round(y + h * 0.55 - N / 2)))
-    noiseProbe ??= document.createElement('canvas')
-    noiseProbe.width = noiseProbe.height = N
-    const c = noiseProbe.getContext('2d', { willReadFrequently: true })
+    const c = probe(N, N)
     c.drawImage(v, sx, sy, N, N, 0, 0, N, N)
     const d = c.getImageData(0, 0, N, N).data
     const L = new Float32Array(N * N)
@@ -159,7 +167,6 @@ export function faceNoise(v, box) {
 // Saturação: fração (0 a 1) da imagem inteira com pixels quase brancos (algum canal >= 250). Quando a imagem estoura
 // perde-se informação; a moldura de luz usa isto para não crescer mais. A causa não está apurada (ver a nota do
 // utilizador no ficheiro de decisões): é uma medida, não uma explicação.
-let satProbe
 export function saturation(v) {
   const vw = v?.videoWidth || v?.width
   const vh = v?.videoHeight || v?.height
@@ -167,10 +174,7 @@ export function saturation(v) {
   try {
     const W = 64
     const H = 36
-    satProbe ??= document.createElement('canvas')
-    satProbe.width = W
-    satProbe.height = H
-    const c = satProbe.getContext('2d', { willReadFrequently: true })
+    const c = probe(W, H)
     c.drawImage(v, 0, 0, W, H)
     const d = c.getImageData(0, 0, W, H).data
     let n = 0
@@ -199,6 +203,8 @@ function summary() {
   const luma = nums(recs.map((x) => x.luma))
   const det = nums(recs.map((x) => x.det))
   const last = recs[recs.length - 1]
+  const sat = nums(recs.map((x) => x.sat))
+  const pct = (v) => (v == null ? null : v * 100)
   return [
     'RESUMO',
     `moldura auto ${last.auto ? 'LIGADA' : 'DESLIGADA'} (${f(last.frame, 1)}vmin)`,
@@ -210,7 +216,7 @@ function summary() {
     `unknown ${recs.filter((x) => x.status === 'unknown').length} spoof ${recs.filter((x) => x.status === 'spoof').length}`,
     `luz cara média ${f(avg(luma), 0)}`,
     `ruído médio ${f(avg(nums(recs.map((x) => x.noise))), 2)}`,
-    `saturação média ${f(avg(nums(recs.map((x) => x.sat))) == null ? null : avg(nums(recs.map((x) => x.sat))) * 100, 1)}% máx ${f(maxOf(nums(recs.map((x) => x.sat))) == null ? null : maxOf(nums(recs.map((x) => x.sat))) * 100, 1)}%`,
+    `saturação média ${f(pct(avg(sat)), 1)}% máx ${f(pct(maxOf(sat)), 1)}%`,
     `real média ${f(avg(real))} mín ${f(minOf(real))}`,
     `live média ${f(avg(live))} mín ${f(minOf(live))}`,
     `det média ${f(avg(det), 0)}ms${engineName() === 'sface' ? ` (SFace ${f(avg(nums(recs.map((x) => x.sface))), 0)}ms)` : ''}`,

@@ -11,11 +11,15 @@ export async function flushQueue(settings) {
   if (running || !isCloudConfigured(settings) || !navigator.onLine) return { sent: 0, pending: (await pendingPunches()).length }
   running = true
   let sent = 0
+  let left = null // quantas ficam por enviar, quando o ciclo o sabe sem reler a fila (0 se acabou com a fila vazia)
   try {
     const url = `${settings.relayUrl.replace(/\/$/, '')}/punch`
     for (;;) {
       const batch = (await pendingPunches()).slice(0, BATCH)
-      if (!batch.length) break
+      if (!batch.length) {
+        left = 0
+        break
+      }
       const ids = batch.map((p) => p.eventId)
       markSending(ids) // enquanto estão a ser enviadas, não se podem apagar
       try {
@@ -65,7 +69,7 @@ export async function flushQueue(settings) {
   } finally {
     running = false
   }
-  return { sent, pending: (await pendingPunches()).length }
+  return { sent, pending: left ?? (await pendingPunches()).length }
 }
 
 // Pedidos para apagar picagens que já tinham sido enviadas. Vão ao relay; o Supabase lê-os de lá e apaga a picagem.

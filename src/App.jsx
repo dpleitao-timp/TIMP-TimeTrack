@@ -6,6 +6,7 @@ import Punches from './views/Punches.jsx'
 import Settings from './views/Settings.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync, syncRoster } from './lib/sync.js'
+import { fetchMissingBiometrics } from './lib/bio.js'
 import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
@@ -178,7 +179,14 @@ export default function App() {
 
   // lista de trabalhadores da obra: ao arrancar, a cada 5 min e quando a rede volta
   useEffect(() => {
-    const run = () => syncRoster(loadSettings()).then((r) => r.ok && !r.unchanged && window.dispatchEvent(new Event('roster-updated')))
+    const run = () =>
+      syncRoster(loadSettings())
+        .then((r) => {
+          if (r.ok && !r.unchanged) window.dispatchEvent(new Event('roster-updated'))
+          // depois da lista, vai buscar a biometria dos trabalhadores da obra que o tablet ainda não tem
+          return r.ok ? fetchMissingBiometrics(loadSettings()) : null
+        })
+        .then((b) => b?.received && window.dispatchEvent(new Event('roster-updated')))
     run()
     const timer = setInterval(run, 5 * 60 * 1000)
     window.addEventListener('online', run)

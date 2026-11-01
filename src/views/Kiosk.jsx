@@ -16,10 +16,19 @@ import ScanClock from './ScanClock.jsx'
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
 
+// Tipos de picagem. in/out são a entrada e a saída da obra; meal_out/meal_in (opcionais, ligados nas Definições) são a saída
+// para almoço/jantar e a volta. O valor é o que se grava e se envia; cls é a classe de estilo.
+const DIRS = {
+  in: { label: 'dir.in', cls: 'in' },
+  out: { label: 'dir.out', cls: 'out' },
+  meal_out: { label: 'dir.mealOut', cls: 'meal-out' },
+  meal_in: { label: 'dir.mealIn', cls: 'meal-in' },
+}
+
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
 export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending }) {
   const { t } = useT()
-  const [direction, setDirection] = useState(null) // null | 'in' | 'out'
+  const [direction, setDirection] = useState(null) // null | 'in' | 'out' | 'meal_out' | 'meal_in'
   const [adminLogin, setAdminLogin] = useState(false)
   const [modelsError, setModelsError] = useState('')
   const modelsState = useModelsReady()
@@ -73,6 +82,28 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
             </button>
           )}
         </div>
+        {settings.mealPunches && (
+          <div className="choice-buttons choice-meal">
+            {settings.mode !== 'in' && (
+              <button type="button" className="choice-btn small meal-out" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_out')}>
+                <span className="choice-icons">
+                  <IconMeal size={48} />
+                  <IconOut size={40} />
+                </span>
+                <span>{t('dir.mealOut')}</span>
+              </button>
+            )}
+            {settings.mode !== 'out' && (
+              <button type="button" className="choice-btn small meal-in" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_in')}>
+                <span className="choice-icons">
+                  <IconMeal size={48} />
+                  <IconIn size={40} />
+                </span>
+                <span>{t('dir.mealIn')}</span>
+              </button>
+            )}
+          </div>
+        )}
         {modelsError && <p className="notice notice-error">{t('kiosk.modelsFail', { err: modelsError })}</p>}
         {hasAdmin && (
           <button type="button" className="btn btn-secondary choice-admin" onClick={() => setAdminLogin(true)}>
@@ -98,7 +129,9 @@ function Scan({ settings, direction, setPending, onDone }) {
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
 
-  const isIn = direction === 'in'
+  const dir = DIRS[direction] ?? DIRS.in
+  const isMeal = direction === 'meal_out' || direction === 'meal_in'
+  const isArrival = direction === 'in' || direction === 'meal_in' // entrada (da obra ou do almoço/jantar)
 
   useEffect(() => {
     if (!ready) return
@@ -200,7 +233,7 @@ function Scan({ settings, direction, setPending, onDone }) {
           show({
             kind: 'ok',
             text: t('kiosk.hello', { name: worker.name }),
-            sub: `${isIn ? t('dir.in') : t('dir.out')} ${fmtTime(punch.punchedAt, locale)}`,
+            sub: `${t(dir.label)} ${fmtTime(punch.punchedAt, locale)}`,
           })
           setPending((await pendingPunches()).length)
           flushQueue(s).then((res) => setPending(res.pending))
@@ -224,12 +257,13 @@ function Scan({ settings, direction, setPending, onDone }) {
 
   return (
     <div className="kiosk-wrap">
-      <div ref={kioskRef} className={`kiosk ${isIn ? 'in' : 'out'}`}>
+      <div ref={kioskRef} className={`kiosk ${dir.cls}`}>
         <video ref={videoRef} muted playsInline className="mirror" />
         <div className="kiosk-top">
           <span className="dir">
-            {isIn ? <IconIn size={26} /> : <IconOut size={26} />}
-            {(isIn ? t('dir.in') : t('dir.out')).toLocaleUpperCase(locale)}
+            {isMeal && <IconMeal size={26} />}
+            {isArrival ? <IconIn size={26} /> : <IconOut size={26} />}
+            {t(dir.label).toLocaleUpperCase(locale)}
           </span>
           {settings.obra?.trim() && (
             <span className="obra-pill" title={t('kiosk.obraLabel')}>
@@ -255,6 +289,17 @@ function Scan({ settings, direction, setPending, onDone }) {
         </button>
       </div>
     </div>
+  )
+}
+
+// Uma refeição: prato com garfo e faca (almoço/jantar).
+function IconMeal({ size = 30 }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M2.8 3v5.5a2 2 0 0 0 4 0V3M4.8 3v18" />
+      <path d="M21.2 21V3c-2 1.4-3 4-3 7v3.5h3" />
+    </svg>
   )
 }
 

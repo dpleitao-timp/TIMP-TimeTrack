@@ -199,6 +199,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Botões quadrados só com ícone (lista de trabalhadores) */
 .row-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.icon-slot { width: 44px; height: 44px; flex: none; }
 .icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 .icon-btn:hover:not(:disabled) { background: rgba(127, 127, 127, 0.12); }
 .icon-btn.on { color: #1a7f45; border-color: currentColor; background: rgba(26, 127, 69, 0.1); }
@@ -319,6 +320,12 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 .choice-btn { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 170px; border: 0; border-radius: var(--radius-lg); color: #fff; font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25); }
 .choice-btn.in { background: var(--ok); }
 .choice-btn.out { background: var(--accent); }
+/* Almoço/jantar (opcional): segunda fila, botões mais baixos */
+.choice-meal { margin-top: 0; }
+.choice-btn.small { min-height: 104px; gap: 8px; font-size: 1.25rem; padding: 0 12px; }
+.choice-btn.meal-out { background: var(--accent); } /* mesma cor da saída */
+.choice-btn.meal-in { background: var(--ok); } /* mesma cor da entrada */
+.choice-icons { display: inline-flex; align-items: center; gap: 10px; }
 .choice-btn:active { transform: scale(0.98); }
 .choice-admin { margin-top: 22px; min-height: 48px; }
 .kiosk.admin .dir { background: var(--accent); }
@@ -346,6 +353,8 @@ body::before {
 .kiosk .obra-pill strong { font-size: 1.2rem; letter-spacing: 0.04em; }
 .kiosk.in .dir { background: var(--ok); }
 .kiosk.out .dir { background: var(--accent); }
+.kiosk.meal-out .dir { background: var(--accent); }
+.kiosk.meal-in .dir { background: var(--ok); }
 
 .banner {
   position: absolute;

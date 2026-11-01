@@ -1,6 +1,7 @@
 // Edge Function: pull-punches
 // É o Supabase que vai buscar as picagens ao relay (Cloudflare) e as grava em `timetrack`.
 // Chamada pelo pg_cron (ver migração 002). Os tablets nunca contactam o Supabase.
+// Também vai buscar ao relay a biometria cifrada pelos tablets e grava-a em `timetrack_biometrics` (migração 009).
 //
 // Segredos (supabase secrets set ...):
 //   RELAY_URL     https://timp-punch-relay.<conta>.workers.dev
@@ -16,8 +17,13 @@ const MAX_FUTURE_MS = 5 * 60 * 1000
 const MAX_PAST_MS = 14 * 24 * 3600 * 1000
 const unit = (v: unknown) => (typeof v === 'number' && v >= 0 && v <= 1 ? v : null) // 0..1 ou null
 
+const DIRECTIONS = ['in', 'out', 'meal_out', 'meal_in'] // entrada e saída da obra, e saída/entrada de almoço ou jantar (migração 010)
+const BIO_BATCH = 20 // registos de biometria por pedido (cada blob pode ter dezenas de KB)
+const MAX_BIO_BATCHES = 10
+
 const enc = new TextEncoder()
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
+const sha256Hex = async (s: string) => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)))
 
 async function signedFetch(path: string, method: 'GET' | 'POST', body = '') {
   const ts = Math.floor(Date.now() / 1000).toString()
@@ -73,7 +79,7 @@ Deno.serve(async (req) => {
           p.sageId.trim() !== '' &&
           typeof p?.obra === 'string' &&
           p.obra.trim() !== '' &&
-          (p.direction === 'in' || p.direction === 'out') &&
+          DIRECTIONS.includes(p.direction) &&
           Number.isFinite(t) &&
           t - now < MAX_FUTURE_MS &&
           now - t < MAX_PAST_MS
@@ -133,5 +139,50 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'pull_failed', detail: String((e as Error)?.message ?? e).slice(0, 300), stored, dropped, removed }), { status: 502 })
   }
 
-  return new Response(JSON.stringify({ stored, dropped, removed }), { headers: { 'Content-Type': 'application/json' } })
+  // Biometria cifrada pelos tablets (migração 009). Num bloco à parte: se falhar, as picagens já gravadas e confirmadas
+  // ficam como estão e o erro só aparece em `bioError`; a biometria fica no relay e tenta-se na próxima execução.
+  // O Supabase não decifra nada: só valida o envelope, grava o blob tal como veio e confirma.
+  const bio = { stored: 0, kept: 0, dropped: 0 }
+  let bioError: string | undefined
+  try {
+    for (let i = 0; i < MAX_BIO_BATCHES; i++) {
+      const { items } = await signedFetch(`/pull-bio?limit=${BIO_BATCH}`, 'GET')
+      if (!items?.length) break
+      const rows: Record<string, unknown>[] = []
+      const ack: { sageId: string; engine: string; hash: string }[] = []
+      for (const it of items) {
+        if (typeof it?.sageId !== 'string' || typeof it?.engine !== 'string' || typeof it?.hash !== 'string') continue // sem isto nem se consegue confirmar
+        ack.push({ sageId: it.sageId, engine: it.engine, hash: it.hash }) // inválidos também se confirmam, para saírem do relay
+        const valid =
+          it.sageId.trim() !== '' &&
+          it.sageId.length <= 32 &&
+          /^[a-z0-9-]{1,32}$/.test(it.engine) &&
+          typeof it.blob === 'string' &&
+          it.blob.length >= 16 &&
+          it.blob.length <= 150000 &&
+          typeof it.deviceId === 'string' &&
+          Number.isFinite(it.updatedAt) &&
+          (await sha256Hex(it.blob)) === it.hash // o Supabase não confia em ninguém: o hash tem de ser o do blob
+        if (!valid) {
+          bio.dropped++
+          continue
+        }
+        rows.push({ sage_id: it.sageId.trim(), engine: it.engine, blob: it.blob, blob_hash: it.hash, updated_at_ms: it.updatedAt, device_id: it.deviceId })
+      }
+      if (rows.length) {
+        const { data, error } = await supabase.rpc('timetrack_store_biometrics', { p_items: rows })
+        if (error) throw new Error(`biometrics: ${error.message}`)
+        bio.stored += data?.stored ?? 0
+        bio.kept += data?.kept ?? 0
+      }
+      // só se confirma depois de gravado: se algo falhar, a biometria fica no relay
+      await signedFetch('/ack-bio', 'POST', JSON.stringify({ items: ack }))
+      if (items.length < BIO_BATCH) break
+    }
+  } catch (e) {
+    console.error(e)
+    bioError = String((e as Error)?.message ?? e).slice(0, 300)
+  }
+
+  return new Response(JSON.stringify({ stored, dropped, removed, bio, bioError }), { headers: { 'Content-Type': 'application/json' } })
 })

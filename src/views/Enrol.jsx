@@ -315,36 +315,38 @@ export default function Enrol({ settings, onRegistered }) {
                     <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : w.stale ? <span className="stale-flag" role="img" title={t('enrol.updateBiometrics')} aria-label={t('enrol.updateBiometrics')}><IconAlert /></span> : t('enrol.vectors', { n: w.embeddings.length })}</small>
                   </span>
                   <span className="row-actions">
+                    {/* Ordem fixa, com o Administrador primeiro e um espaço vazio quando falta um botão, para os ícones ficarem alinhados em todas as linhas */}
+                    {w.broken ? (
+                      <span className="icon-slot" />
+                    ) : w.role === 'admin' && isUsable(w) && usableAdmins === 1 ? (
+                      // único Administrador ativo: não pode perder o perfil
+                      <IconButton label={t('enrol.adminBadge')} disabled on>
+                        <IconShield checked />
+                      </IconButton>
+                    ) : (
+                      <IconButton label={w.role === 'admin' ? t('enrol.removeAdmin') : t('enrol.makeAdmin')} on={w.role === 'admin'} onClick={() => toggleRole(w)}>
+                        <IconShield checked={w.role === 'admin'} />
+                      </IconButton>
+                    )}
                     <IconButton label={t('enrol.updateBiometrics')} disabled={capturing} onClick={() => startReplace(w)}>
                       <IconFace />
                     </IconButton>
-                    {isUsable(w) && (
+                    {isUsable(w) ? (
                       <IconButton label={t('enrol.addPpe')} disabled={capturing} onClick={() => startAdd(w)}>
                         <IconCameraPlus />
                       </IconButton>
-                    )}
-                    {w.role === 'admin' && isUsable(w) && usableAdmins === 1 ? (
-                      // único Administrador ativo: não pode perder o perfil; só se apaga se for também o único trabalhador
-                      <>
-                        <IconButton label={t('enrol.adminBadge')} disabled on>
-                          <IconShield checked />
-                        </IconButton>
-                        <IconButton label={t('enrol.delete')} danger disabled={workers.length > 1} onClick={() => removeWorker(w, true)}>
-                          <IconTrash />
-                        </IconButton>
-                      </>
                     ) : (
-                      <>
-                        {!w.broken && (
-                          <IconButton label={w.role === 'admin' ? t('enrol.removeAdmin') : t('enrol.makeAdmin')} on={w.role === 'admin'} onClick={() => toggleRole(w)}>
-                            <IconShield checked={w.role === 'admin'} />
-                          </IconButton>
-                        )}
-                        <IconButton label={t('enrol.delete')} danger onClick={() => removeWorker(w, false)}>
-                          <IconTrash />
-                        </IconButton>
-                      </>
+                      <span className="icon-slot" />
                     )}
+                    {/* o único Administrador só se apaga se for também o único trabalhador, com confirmação reforçada (escrever o SAGE ID) */}
+                    <IconButton
+                      label={t('enrol.delete')}
+                      danger
+                      disabled={w.role === 'admin' && isUsable(w) && usableAdmins === 1 && workers.length > 1}
+                      onClick={() => removeWorker(w, w.role === 'admin' && isUsable(w) && usableAdmins === 1)}
+                    >
+                      <IconTrash />
+                    </IconButton>
                   </span>
                 </li>
               ))}

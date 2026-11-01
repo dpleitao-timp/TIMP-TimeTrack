@@ -51,32 +51,68 @@ async function decrypt({ iv, data }) {
 
 // --- Trabalhadores ---
 // role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador.
-export async function saveWorker({ id, name, embeddings, role = 'user', createdAt, engine }) {
+// rev: instante da última gravação da biometria. bioSent: a biometria já foi enviada ao relay (ou veio de lá); só se envia o que
+// ainda não foi. Os registos que chegam do relay entram com bioSent verdadeiro e sempre como 'user'.
+export async function saveWorker({ id, name, embeddings, role = 'user', createdAt, engine, bioSent = false }) {
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
-  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? engineTag() })
+  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? engineTag(), rev: Date.now(), bioSent })
+}
+
+// Lê um registo da base: decifra os vetores. Os que não decifram (ex.: criados com a chave errada) ficam sem vetores e
+// marcados como `broken`, para poderem ser apagados e registados de novo.
+async function readRow(w, current, oldest) {
+  const engine = w.engine ?? 'faceres' // registos anteriores ao motor alternativo
+  // `stale`: biometria feita com outro motor; não serve para reconhecer até ser atualizada
+  const base = {
+    id: w.id,
+    name: w.name,
+    createdAt: w.createdAt,
+    rev: w.rev,
+    bioSent: w.bioSent === true,
+    engine,
+    stale: engine !== current,
+    role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user',
+  }
+  try {
+    return { ...base, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
+  } catch {
+    return { ...base, embeddings: [], broken: true }
+  }
 }
 
 export async function listWorkers() {
   const d = await db()
   const rows = await d.getAll('workers')
-  // Registos anteriores à existência de perfis: o mais antigo passa a Administrador.
-  const oldest = rows.length && !rows.some((w) => w.role === 'admin') ? [...rows].sort((x, y) => x.createdAt - y.createdAt)[0].id : null
+  // Registos anteriores à existência de perfis (sem campo `role`): se não há Administrador, o mais antigo deles passa a
+  // Administrador. Só conta quem não tem `role` gravado: os que chegam do relay entram como 'user' de propósito.
+  const oldest = rows.length && !rows.some((w) => w.role === 'admin') ? ([...rows].filter((w) => w.role == null).sort((x, y) => x.createdAt - y.createdAt)[0]?.id ?? null) : null
   const current = engineTag()
-  // Registos que não decifram (ex.: criados com a chave errada) ficam sem vetores
-  // e marcados como `broken`, para poderem ser apagados e registados de novo.
-  return Promise.all(
-    rows.map(async (w) => {
-      const engine = w.engine ?? 'faceres' // registos anteriores ao motor alternativo
-      // `stale`: biometria feita com outro motor; não serve para reconhecer até ser atualizada
-      const base = { id: w.id, name: w.name, createdAt: w.createdAt, engine, stale: engine !== current, role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user' }
-      try {
-        return { ...base, embeddings: await Promise.all(w.embeddings.map(decrypt)) }
-      } catch {
-        return { ...base, embeddings: [], broken: true }
-      }
-    }),
-  )
+  return Promise.all(rows.map((w) => readRow(w, current, oldest)))
+}
+
+// Identificação dos registos sem decifrar nada (barato): id, motor, perfil.
+export async function listWorkerHeads() {
+  const d = await db()
+  return (await d.getAll('workers')).map((w) => ({ id: w.id, engine: w.engine ?? 'faceres', role: w.role === 'admin' ? 'admin' : 'user', createdAt: w.createdAt }))
+}
+
+// Registos utilizáveis (motor atual, legíveis) cuja biometria ainda não foi enviada ao relay.
+export async function listUnsentWorkers() {
+  const d = await db()
+  const current = engineTag()
+  const rows = (await d.getAll('workers')).filter((w) => w.bioSent !== true && (w.engine ?? 'faceres') === current)
+  const out = await Promise.all(rows.map((w) => readRow(w, current, null)))
+  return out.filter((w) => !w.broken && w.embeddings.length)
+}
+
+// Marca como enviado, mas só se o registo não mudou entretanto (`rev`): uma biometria atualizada durante o envio tem de seguir de novo.
+export async function markBioSent(id, rev) {
+  const d = await db()
+  const tx = d.transaction('workers', 'readwrite')
+  const w = await tx.store.get(id)
+  if (w && w.rev === rev) await tx.store.put({ ...w, bioSent: true })
+  await tx.done
 }
 
 // Só existe administração protegida se houver um Administrador utilizável (vetores legíveis e do motor atual).

@@ -43,6 +43,9 @@ let j = await r.json()
 check('POST /punch aceita 2 picagens', r.status === 200 && j.accepted.length === 2 && !!j.serverTime, JSON.stringify(j))
 r = await post({ deviceId: DEVICE, punches: [punch(base)] })
 check('reenvio do mesmo evento é aceite', r.status === 200)
+r = await post({ deviceId: DEVICE, punches: [punch(base + 20, { direction: 'meal_out' }), punch(base + 21, { direction: 'meal_in' })] })
+j = await r.json()
+check('saída e entrada de almoço/jantar são aceites', r.status === 200 && j.accepted.length === 2 && j.rejected.length === 0, JSON.stringify(j))
 
 // 2. autenticação do tablet
 r = await post({ deviceId: DEVICE, punches: [punch(base + 2)] }, 'token-errado')

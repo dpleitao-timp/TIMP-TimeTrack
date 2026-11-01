@@ -11,10 +11,12 @@ const DEFAULTS = {
   backend: 'webgl', // aceleração gráfica: 'webgl' | 'webgpu' (experimental; cai para webgl se o aparelho não suportar)
   obra: '', // obra onde está o tablet; vai em todas as picagens
   mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
+  mealPunches: false, // mostra também "saída para almoço/jantar" e "entrada de almoço/jantar" (opcional, por tablet)
   deviceName: 'Tablet 1',
   deviceId: '',
   deviceToken: '',
   relayUrl: '', // relay Cloudflare onde o tablet escreve (o Supabase vai lá buscar)
+  bioKey: '', // chave da frota: frase-passe que cifra a biometria que sai do tablet (a mesma em todos; ver bio.js). Vazia = a biometria não viaja
   engine: 'faceres', // motor de reconhecimento
   threshold: 0.55, // similaridade mínima do FaceRes (0..1)
   thresholdSface: 0.45, // semelhança mínima do SFace (cosseno, -1..1): escala diferente da do FaceRes, não se aproveitam os valores
@@ -102,3 +104,5 @@ export function bumpStat(name, ms) {
 export const resetStats = () => localStorage.removeItem(STATS_KEY)
 
 export const isCloudConfigured = (s) => !!(s.relayUrl && s.deviceToken)
+// A biometria só viaja se o tablet tem relay e a chave da frota (frase-passe com pelo menos 8 caracteres, igual em todos os tablets)
+export const isBioConfigured = (s) => isCloudConfigured(s) && (s.bioKey || '').length >= 8

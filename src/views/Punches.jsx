@@ -51,6 +51,7 @@ export default function Punches() {
   // Resumo por trabalhador: primeira entrada / última saída e picagens sem par.
   const summary = {}
   for (const p of [...rows].sort((a, b) => a.punchedAt.localeCompare(b.punchedAt))) {
+    if (p.direction === 'meal_out' || p.direction === 'meal_in') continue // almoço/jantar não entra na contagem de entradas e saídas
     const sid = p.sageId ?? p.workerId
     const s = (summary[sid] ??= { name: p.workerName || sid, sageId: sid, ins: [], outs: [] })
     ;(p.direction === 'in' ? s.ins : s.outs).push(p.punchedAt)
@@ -102,7 +103,7 @@ export default function Punches() {
                 <td>{p.obra}</td>
                 <td>{p.sageId ?? p.workerId}</td>
                 <td>{p.workerName}</td>
-                <td>{p.direction === 'in' ? t('dir.in') : t('dir.out')}</td>
+                <td>{t({ in: 'dir.in', out: 'dir.out', meal_out: 'dir.mealOut', meal_in: 'dir.mealIn' }[p.direction] ?? 'dir.out')}</td>
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
                 <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : `⏳ (${p.attempts})`}</td>

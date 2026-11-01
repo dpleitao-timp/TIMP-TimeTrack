@@ -4,11 +4,14 @@
 //   Tablet  ◄── GET /roster ──  [roster]  ◄── POST /roster ──  Supabase
 //   Tablet  ── POST /punch/delete ──►  [deletions]  ◄── GET /pull-deletions, POST /ack-deletions ──  Supabase
 //   Tablet  ── qualquer pedido autenticado ──►  [devices.last_seen]  ◄── GET /devices-status ──  Supabase (função relay-status da intranet)
+//   Tablet  ── POST /biometrics ──►  [bio_outbox]  ◄── GET /pull-bio, POST /ack-bio ──  Supabase   (biometria cifrada pelos tablets)
+//   Tablet  ◄── POST /bio-fetch ──  [bio_store]  ◄── POST /bio-store ──  Supabase
 //
 // O tablet escreve picagens (e pedidos para as apagar) e lê a lista de trabalhadores (token do dispositivo). O Supabase lê as picagens,
 // confirma-as e publica a lista (pedidos assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
 
 const MAX_BATCH = 200
+const DIRECTIONS = ['in', 'out', 'meal_out', 'meal_in'] // entrada e saída da obra, e saída/entrada de almoço ou jantar
 const MAX_BODY_BYTES = 256 * 1024
 const MAX_FUTURE_MS = 5 * 60 * 1000 // rejeita horas > 5 min no futuro
 const MAX_PAST_MS = 14 * 24 * 3600 * 1000 // ou com mais de 14 dias
@@ -114,7 +117,7 @@ async function handlePunch(request, env) {
       typeof p?.obra === 'string' &&
       p.obra.trim() !== '' &&
       p.obra.length <= 64 &&
-      (p.direction === 'in' || p.direction === 'out') &&
+      DIRECTIONS.includes(p.direction) &&
       Number.isFinite(t) &&
       t - now < MAX_FUTURE_MS &&
       now - t < MAX_PAST_MS
@@ -320,10 +323,170 @@ async function handleDevicesStatus(request, url, env) {
   })
 }
 
+// ------------------------------------------------------------------ biometria
+// O relay só transporta BLOBS CIFRADOS pelos tablets (AES-GCM com a chave da frota, que o relay e o Supabase não têm):
+// nunca vê um vetor. Mesmo desenho das picagens:
+//   tablet ── POST /biometrics ──► [bio_outbox] ◄── GET /pull-bio, POST /ack-bio ── Supabase
+//   tablet ◄── POST /bio-fetch ── [bio_store]  ◄── POST /bio-store ── Supabase (de 6 em 6 horas, com a lista)
+// Chave de cada registo: (sage_id, engine). O motor faz parte dela porque os vetores de um motor não servem noutro.
+const MAX_BIO_BLOB = 150_000 // caracteres de um blob
+const MAX_BIO_ITEMS = 50
+const MAX_BIO_BACKLOG = 5000
+const MAX_BIO_ACK = 100
+
+const bioItemValid = (i) =>
+  typeof i?.sageId === 'string' && i.sageId.trim() !== '' && i.sageId.trim().length <= 32 &&
+  typeof i?.engine === 'string' && /^[a-z0-9-]{1,32}$/.test(i.engine) &&
+  typeof i?.blob === 'string' && i.blob.length >= 16 && i.blob.length <= MAX_BIO_BLOB &&
+  Number.isFinite(i?.updatedAt)
+
+// Lê o corpo JSON de um pedido de tablet e autentica o dispositivo. Devolve { body, device } ou { error: Response }.
+async function tabletRequest(request, env) {
+  const cors = corsHeaders(env)
+  const token = request.headers.get('x-device-token')
+  if (!token) return { error: json({ error: 'missing_token' }, 401, cors) }
+  const text = await readBody(request)
+  if (text === null) return { error: json({ error: 'too_large' }, 413, cors) }
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return { error: json({ error: 'invalid_json' }, 400, cors) }
+  }
+  const deviceId = String(body?.deviceId ?? '')
+  if (!deviceId) return { error: json({ error: 'invalid_payload' }, 400, cors) }
+  const device = await env.DB.prepare('SELECT token_hash, active, obra FROM devices WHERE id = ?').bind(deviceId).first()
+  if (!device || !device.active || !timingSafeEqualHex(device.token_hash, await sha256Hex(token))) {
+    return { error: json({ error: 'invalid_device' }, 401, cors) }
+  }
+  await touchDevice(env, deviceId)
+  return { body, device, deviceId }
+}
+
+// Tablet → relay. Corpo: { deviceId, items: [{ sageId, engine, blob, updatedAt }] }. Fica um só registo por (sage_id, engine):
+// o mais recente substitui o anterior. Devolve accepted/rejected como "sageId|engine".
+async function handleBioPost(request, env) {
+  const cors = corsHeaders(env)
+  const r = await tabletRequest(request, env)
+  if (r.error) return r.error
+  const items = Array.isArray(r.body?.items) ? r.body.items : []
+  if (!items.length || items.length > MAX_BIO_ITEMS) return json({ error: 'invalid_payload' }, 400, cors)
+  const backlog = await env.DB.prepare('SELECT COUNT(*) AS n FROM bio_outbox').first()
+  if (backlog.n >= MAX_BIO_BACKLOG) return json({ error: 'backlog_full' }, 429, cors)
+
+  const now = Math.floor(Date.now() / 1000)
+  const stmts = []
+  const accepted = []
+  const rejected = []
+  for (const i of items) {
+    const key = `${String(i?.sageId ?? '').trim()}|${i?.engine}`
+    if (!bioItemValid(i)) {
+      rejected.push(key)
+      continue
+    }
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO bio_outbox (sage_id, engine, device_id, blob, blob_hash, updated_at, received_at) VALUES (?, ?, ?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(sage_id, engine) DO UPDATE SET device_id = excluded.device_id, blob = excluded.blob, blob_hash = excluded.blob_hash, updated_at = excluded.updated_at, received_at = excluded.received_at',
+      ).bind(i.sageId.trim(), i.engine, r.deviceId, i.blob, await sha256Hex(i.blob), Math.floor(i.updatedAt), now),
+    )
+    accepted.push(key)
+  }
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ accepted, rejected }, 200, cors)
+}
+
+// Supabase lê o que os tablets enviaram.
+async function handlePullBio(request, url, env) {
+  if (!(await verifySignature(request, url, '', env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '20', 10) || 20, 1), MAX_BIO_ITEMS)
+  const { results } = await env.DB.prepare('SELECT sage_id, engine, device_id, blob, blob_hash, updated_at FROM bio_outbox ORDER BY received_at LIMIT ?').bind(limit).all()
+  return json({ items: results.map((x) => ({ sageId: x.sage_id, engine: x.engine, deviceId: x.device_id, blob: x.blob, hash: x.blob_hash, updatedAt: x.updated_at })) })
+}
+
+// Supabase confirma o que gravou. O hash garante que só sai do relay o blob que foi lido (se o tablet enviou outro
+// entretanto, esse fica para a próxima).
+async function handleAckBio(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let items
+  try {
+    items = JSON.parse(text)?.items
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  if (!Array.isArray(items) || items.length > MAX_BIO_ACK || items.some((i) => typeof i?.sageId !== 'string' || typeof i?.engine !== 'string' || typeof i?.hash !== 'string')) {
+    return json({ error: 'invalid_payload' }, 400)
+  }
+  const stmts = items.map((i) => env.DB.prepare('DELETE FROM bio_outbox WHERE sage_id = ? AND engine = ? AND blob_hash = ?').bind(i.sageId, i.engine, i.hash))
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ deleted: items.length })
+}
+
+// Supabase publica a biometria para os tablets. Corpo: { gen, final, items: [{ sageId, engine, blob, updatedAt }] }, em blocos com o
+// mesmo `gen`; no último (`final`) apagam-se os registos de envios anteriores.
+async function handleBioStore(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  const gen = body?.gen
+  const items = body?.items
+  if (!Number.isSafeInteger(gen) || gen <= 0 || !Array.isArray(items) || items.length > MAX_BIO_ITEMS) return json({ error: 'invalid_payload' }, 400)
+  const stmts = []
+  let rejected = 0
+  for (const i of items) {
+    if (!bioItemValid(i)) {
+      rejected++
+      continue
+    }
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO bio_store (sage_id, engine, blob, updated_at, gen) VALUES (?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(sage_id, engine) DO UPDATE SET blob = excluded.blob, updated_at = excluded.updated_at, gen = excluded.gen',
+      ).bind(i.sageId.trim(), i.engine, i.blob, Math.floor(i.updatedAt), gen),
+    )
+  }
+  if (body.final === true) stmts.push(env.DB.prepare('DELETE FROM bio_store WHERE gen <> ?').bind(gen))
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ stored: items.length - rejected, rejected })
+}
+
+// Tablet ← relay. Corpo: { deviceId, engine, obra?, ids: [sageId...] }. Só devolve a biometria dos trabalhadores ativos da OBRA
+// DO TABLET (a do dispositivo no relay, ou a que o tablet diz se o dispositivo não tem) e do motor pedido.
+async function handleBioFetch(request, env) {
+  const cors = corsHeaders(env)
+  const r = await tabletRequest(request, env)
+  if (r.error) return r.error
+  const engine = String(r.body?.engine ?? '')
+  const ids = r.body?.ids
+  if (!/^[a-z0-9-]{1,32}$/.test(engine) || !Array.isArray(ids) || !ids.length || ids.length > MAX_BIO_ITEMS || ids.some((i) => typeof i !== 'string' || !i.trim() || i.length > 32)) {
+    return json({ error: 'invalid_payload' }, 400, cors)
+  }
+  const obra = (r.device.obra || String(r.body?.obra ?? '')).trim()
+  if (!obra) return json({ error: 'missing_obra' }, 400, cors)
+  const { results } = await env.DB.prepare(
+    `SELECT s.sage_id, s.engine, s.blob, s.updated_at FROM bio_store s WHERE s.engine = ? AND s.sage_id IN (${ids.map(() => '?').join(',')}) ` +
+      'AND s.sage_id IN (SELECT sage_id FROM roster WHERE lower(trim(obra)) = lower(?) AND active = 1)',
+  ).bind(engine, ...ids.map((i) => i.trim()), obra).all()
+  return json({ items: results.map((x) => ({ sageId: x.sage_id, engine: x.engine, blob: x.blob, updatedAt: x.updated_at })) }, 200, cors)
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (request.method === 'OPTIONS' && (url.pathname === '/punch' || url.pathname === '/punch/delete' || url.pathname === '/roster')) return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'OPTIONS' && ['/punch', '/punch/delete', '/roster', '/biometrics', '/bio-fetch'].includes(url.pathname)) return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'POST' && url.pathname === '/biometrics') return handleBioPost(request, env)
+    if (request.method === 'POST' && url.pathname === '/bio-fetch') return handleBioFetch(request, env)
+    if (request.method === 'GET' && url.pathname === '/pull-bio') return handlePullBio(request, url, env)
+    if (request.method === 'POST' && url.pathname === '/ack-bio') return handleAckBio(request, url, env)
+    if (request.method === 'POST' && url.pathname === '/bio-store') return handleBioStore(request, url, env)
     if (request.method === 'POST' && url.pathname === '/punch/delete') return handleDelete(request, env)
     if (request.method === 'GET' && url.pathname === '/pull-deletions') return handlePullDeletions(request, url, env)
     if (request.method === 'POST' && url.pathname === '/ack-deletions') return handleAckDeletions(request, url, env)

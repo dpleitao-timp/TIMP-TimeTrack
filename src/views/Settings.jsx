@@ -10,7 +10,8 @@ import { diagCount, diagText } from '../lib/diag.js'
 import { applyOrientation, canLock, currentOrientation } from '../lib/orientation.js'
 import { initHuman, similarity } from '../lib/face.js'
 import { listWorkers } from '../lib/db.js'
-import { thresholdFor } from '../lib/settings.js'
+import { thresholdFor, isBioConfigured } from '../lib/settings.js'
+import { syncBiometrics } from '../lib/bio.js'
 import { evaluate } from '../lib/evaluate.js'
 
 export default function Settings({ settings, onChange }) {
@@ -84,6 +85,18 @@ export default function Settings({ settings, onChange }) {
     if (r.ok) window.dispatchEvent(new Event('roster-updated'))
   }
 
+  // Biometria: envia a que falta enviar e vai buscar a dos trabalhadores da obra que o tablet não tem (ver bio.js)
+  const [bioMsg, setBioMsg] = useState('')
+  const bioRefresh = async () => {
+    setBioMsg('')
+    const cfg = { ...settings, ...s, obra: (s.obra || '').trim() }
+    if (!isBioConfigured(cfg)) return setBioMsg(t('settings.bioNoKey'))
+    setBioMsg(t('settings.bioWorking'))
+    const r = await syncBiometrics(cfg)
+    setBioMsg(r.error ? t('settings.bioError', { err: r.error }) : t(r.failed ? 'settings.bioResultFailed' : 'settings.bioResult', { sent: r.sent, received: r.received, failed: r.failed }))
+    if (r.received) window.dispatchEvent(new Event('roster-updated'))
+  }
+
   const detectCameras = async () => {
     setCamMsg('')
     try {
@@ -136,6 +149,7 @@ export default function Settings({ settings, onChange }) {
               </select>
               <small>{t('settings.modeHint')}</small>
             </label>
+            {toggle('mealPunches', t('settings.meal'), t('settings.mealHint'))}
             <label className="field">
               {t('settings.theme')}
               <select
@@ -176,6 +190,15 @@ export default function Settings({ settings, onChange }) {
               {t('settings.deviceToken')}
               <input className="field-input" type="password" value={s.deviceToken} onChange={set('deviceToken')} />
             </label>
+            <label className="field">
+              {t('settings.bioKey')}
+              <input className="field-input" type="password" value={s.bioKey || ''} onChange={set('bioKey')} autoComplete="off" />
+              <small>{t('settings.bioKeyHint')}</small>
+            </label>
+            <button type="button" className="btn btn-secondary btn-small" onClick={bioRefresh}>
+              {t('settings.bioSync')}
+            </button>
+            {bioMsg && <p className="muted">{bioMsg}</p>}
           </section>
 
           <section className="card">

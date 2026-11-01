@@ -37,3 +37,26 @@ CREATE TABLE IF NOT EXISTS roster (
   PRIMARY KEY (sage_id, obra)
 );
 CREATE INDEX IF NOT EXISTS roster_obra_idx ON roster (obra);
+
+-- Biometria (vetores faciais) CIFRADA pelos tablets com a chave da frota: o relay só vê blobs ilegíveis.
+-- bio_outbox: o que os tablets enviaram e o Supabase ainda não leu (um registo por trabalhador e motor; o mais recente substitui).
+CREATE TABLE IF NOT EXISTS bio_outbox (
+  sage_id     TEXT NOT NULL,
+  engine      TEXT NOT NULL,                 -- motor/modelo com que foi feita (os vetores de um motor não servem noutro)
+  device_id   TEXT NOT NULL,
+  blob        TEXT NOT NULL,                 -- JSON cifrado (AES-GCM) pelo tablet
+  blob_hash   TEXT NOT NULL,                 -- sha256 do blob: o Supabase confirma com ele e só sai do relay o que foi lido
+  updated_at  INTEGER NOT NULL,              -- quando o tablet fez o registo (ms)
+  received_at INTEGER NOT NULL,
+  PRIMARY KEY (sage_id, engine)
+);
+
+-- bio_store: a biometria que o Supabase publica (de 6 em 6 horas, com a lista) para os tablets que não a têm.
+CREATE TABLE IF NOT EXISTS bio_store (
+  sage_id    TEXT NOT NULL,
+  engine     TEXT NOT NULL,
+  blob       TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  gen        INTEGER NOT NULL,               -- instante do envio; os registos de envios antigos são apagados no fim
+  PRIMARY KEY (sage_id, engine)
+);

@@ -1,5 +1,6 @@
 import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta } from './db.js'
 import { isCloudConfigured } from './settings.js'
+import { flushBiometrics } from './bio.js'
 
 const BATCH = 50
 let running = false
@@ -115,7 +116,10 @@ export async function syncRoster(settings, { force = false } = {}) {
 
 // Arranca reenvio automático: ao voltar online e a cada 20 s.
 export function startAutoSync(getSettings, onResult) {
-  const run = async () => onResult?.(await flushQueue(getSettings()))
+  const run = async () => {
+    onResult?.(await flushQueue(getSettings()))
+    flushBiometrics(getSettings()) // a biometria nova segue pelo mesmo caminho (só se houver chave da frota e algo por enviar)
+  }
   const timer = setInterval(run, 20000)
   window.addEventListener('online', run)
   run()

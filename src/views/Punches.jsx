@@ -120,15 +120,15 @@ export default function Punches() {
       <h3>{t('transfer.title')}</h3>
       <div className="card">
         <p className="muted" style={{ marginTop: 0 }}>{t('transfer.help')}</p>
-        <div className="btn-row">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           <button type="button" className="btn btn-secondary btn-small" onClick={exportPunches} disabled={busy}>{t('transfer.export')}</button>
-          <label className="btn btn-secondary btn-small" style={{ cursor: 'pointer' }}>
+          <label className="btn btn-secondary btn-small" style={{ display: 'inline-flex', alignItems: 'center', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.5 : 1 }}>
             {t('transfer.import')}
             <input type="file" accept=".json,application/json" onChange={importPunches} disabled={busy} hidden />
           </label>
         </div>
-        <label className="muted" style={{ display: 'block', marginTop: 10 }}>
-          <input type="checkbox" checked={includeHanded} onChange={(e) => setIncludeHanded(e.target.checked)} /> {t('transfer.includeHanded')}
+        <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={includeHanded} onChange={(e) => setIncludeHanded(e.target.checked)} /> {t('transfer.includeHanded')}
         </label>
       </div>
 

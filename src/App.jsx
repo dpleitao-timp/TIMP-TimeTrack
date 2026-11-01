@@ -3,7 +3,6 @@ import Kiosk from './views/Kiosk.jsx'
 import ScanClock from './views/ScanClock.jsx'
 import { loadSettings, saveSettings } from './lib/settings.js'
 import { startAutoSync, syncRoster } from './lib/sync.js'
-import { fetchMissingBiometrics, applyBioTombstones } from './lib/bio.js'
 import { listWorkers, hasUsableAdmin, isUsable, pendingPunches, dropWorkersCache } from './lib/db.js'
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
@@ -95,6 +94,13 @@ export default function App() {
     }
   }, [])
 
+  // as definições mudaram fora desta página (o tablet ligou-se ao relay e apagou o código de instalação, ver relay.js)
+  useEffect(() => {
+    const h = () => setSettings(loadSettings())
+    window.addEventListener('settings-changed', h)
+    return () => window.removeEventListener('settings-changed', h)
+  }, [])
+
   // orientação do ecrã escolhida nas Definições (onde o aparelho deixar fixá-la; ver orientation.js)
   useEffect(() => {
     applyOrientation(settings.orientation || 'auto')
@@ -183,14 +189,7 @@ export default function App() {
   useEffect(() => {
     const run = () =>
       syncRoster(loadSettings())
-        .then((r) => {
-          if (r.ok && !r.unchanged) window.dispatchEvent(new Event('roster-updated'))
-          if (!r.ok) return null
-          // depois da lista: aplica os apagamentos vindos de outros tablets e vai buscar a biometria dos trabalhadores da obra que
-          // o tablet ainda não tem (por esta ordem, para não voltar a importar quem acabou de ser apagado)
-          return applyBioTombstones(loadSettings()).then((d) => fetchMissingBiometrics(loadSettings()).then((b) => ({ ...b, deleted: d.deleted })))
-        })
-        .then((b) => (b?.received || b?.deleted) && window.dispatchEvent(new Event('roster-updated')))
+        .then((r) => r.ok && !r.unchanged && window.dispatchEvent(new Event('roster-updated')))
     run()
     const timer = setInterval(run, 5 * 60 * 1000)
     window.addEventListener('online', run)
@@ -294,7 +293,7 @@ export default function App() {
         v{__APP_VERSION__} · {__APP_BUILD__} · {__APP_DATE__}
       </div>
       {current === 'kiosk' && (
-        <Kiosk settings={settings} hasAdmin={!!hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
+        <Kiosk settings={settings} hasAdmin={hasAdmin} onAdminUnlock={(w) => { setAdmin({ id: w.id, name: w.name }); location.hash = '#/punches' }} />
       )}
       <Suspense fallback={null}>
         {current === 'enrol' && <Enrol settings={settings} onRegistered={onRegistered} />}

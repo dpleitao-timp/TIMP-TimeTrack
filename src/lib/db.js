@@ -13,6 +13,11 @@ function db() {
       }
       if (oldVersion < 2) d.createObjectStore('roster', { keyPath: 'sageId' }) // lista de trabalhadores da obra (vem do relay)
     },
+  }).then(async (d) => {
+    // A biometria já não sai do tablet (a partilha entre tablets foi retirada): apaga o que ela deixou nos tablets que a usaram (fila de
+    // apagamentos, lápides e a respetiva versão).
+    for (const k of ['bioDelQueue', 'bioTombs', 'bioTombVersion']) await d.delete('meta', k)
+    return d
   })
   return dbPromise
 }
@@ -57,18 +62,13 @@ let workersCache = null // { tag, promise }
 export const dropWorkersCache = () => {
   workersCache = null
 }
-// Pode haver registos com a biometria por enviar ao relay? Evita reler (e clonar) todos os registos a cada 20 s só para ver que não há.
-let unsentMayExist = true
 
-// role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador.
-// rev: instante da última gravação da biometria. bioSent: a biometria já foi enviada ao relay (ou veio de lá); só se envia o que
-// ainda não foi. Os registos que chegam do relay entram com bioSent verdadeiro e sempre como 'user'.
-export async function saveWorker({ id, name, embeddings, role = 'user', createdAt, engine, bioSent = false }) {
+// role: 'admin' | 'user'. O primeiro trabalhador registado é sempre Administrador. Os vetores só existem neste tablet, cifrados.
+export async function saveWorker({ id, name, embeddings, role = 'user', createdAt, engine }) {
   const d = await db()
   const enc = await Promise.all(embeddings.map(encrypt))
-  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? engineTag(), rev: Date.now(), bioSent })
+  await d.put('workers', { id, name, role, embeddings: enc, createdAt: createdAt ?? Date.now(), engine: engine ?? engineTag() })
   dropWorkersCache()
-  if (!bioSent) unsentMayExist = true
 }
 
 // Lê um registo da base: decifra os vetores. Os que não decifram (ex.: criados com a chave errada) ficam sem vetores e
@@ -80,8 +80,6 @@ async function readRow(w, current, oldest) {
     id: w.id,
     name: w.name,
     createdAt: w.createdAt,
-    rev: w.rev,
-    bioSent: w.bioSent === true,
     engine,
     stale: engine !== current,
     role: w.role === 'admin' || w.id === oldest ? 'admin' : 'user',
@@ -109,36 +107,9 @@ async function readWorkers(current) {
   const d = await db()
   const rows = await d.getAll('workers')
   // Registos anteriores à existência de perfis (sem campo `role`): se não há Administrador, o mais antigo deles passa a
-  // Administrador. Só conta quem não tem `role` gravado: os que chegam do relay entram como 'user' de propósito.
+  // Administrador. Só conta quem não tem `role` gravado.
   const oldest = rows.length && !rows.some((w) => w.role === 'admin') ? ([...rows].filter((w) => w.role == null).sort((x, y) => x.createdAt - y.createdAt)[0]?.id ?? null) : null
   return Promise.all(rows.map((w) => readRow(w, current, oldest)))
-}
-
-// Identificação dos registos sem decifrar nada (barato): id, motor, perfil.
-export async function listWorkerHeads() {
-  const d = await db()
-  return (await d.getAll('workers')).map((w) => ({ id: w.id, engine: w.engine ?? 'faceres', role: w.role === 'admin' ? 'admin' : 'user', createdAt: w.createdAt, rev: w.rev }))
-}
-
-// Registos utilizáveis (motor atual, legíveis) cuja biometria ainda não foi enviada ao relay.
-export async function listUnsentWorkers() {
-  if (!unsentMayExist) return []
-  const d = await db()
-  const current = engineTag()
-  const rows = (await d.getAll('workers')).filter((w) => w.bioSent !== true && (w.engine ?? 'faceres') === current)
-  unsentMayExist = rows.length > 0 // se não há nenhum por enviar, só um registo novo (saveWorker) volta a ligar isto
-  const out = await Promise.all(rows.map((w) => readRow(w, current, null)))
-  return out.filter((w) => !w.broken && w.embeddings.length)
-}
-
-// Marca como enviado, mas só se o registo não mudou entretanto (`rev`): uma biometria atualizada durante o envio tem de seguir de novo.
-export async function markBioSent(id, rev) {
-  const d = await db()
-  const tx = d.transaction('workers', 'readwrite')
-  const w = await tx.store.get(id)
-  if (w && w.rev === rev) await tx.store.put({ ...w, bioSent: true })
-  await tx.done
-  dropWorkersCache()
 }
 
 // Só existe administração protegida se houver um Administrador utilizável (vetores legíveis e do motor atual).
@@ -194,45 +165,12 @@ export async function setWorkerRole(id, role) {
   dropWorkersCache()
 }
 
-// propagate: o apagar tem de chegar a todos os tablets e ao Supabase (fila `bioDelQueue`, enviada por bio.js). Fica a falso
-// quando o apagar veio de outro tablet (senão voltava a ser enviado).
-export async function deleteWorker(id, { propagate = true } = {}) {
+// Apaga o trabalhador (a biometria só existe neste tablet).
+export async function deleteWorker(id) {
   await assertNotLastAdmin(id, { allowIfOnlyWorker: true })
   const d = await db()
   await d.delete('workers', id)
   dropWorkersCache()
-  if (propagate) await queueBioDeletion(id)
-}
-
-// --- Apagar biometria em todos os tablets: fila de pedidos por enviar, lápides já vistas e versão da lista do relay ---
-async function queueBioDeletion(id, at = Date.now()) {
-  const d = await db()
-  const q = (await d.get('meta', 'bioDelQueue')) || []
-  await d.put('meta', [...q.filter((x) => x.sageId !== id), { sageId: id, at }], 'bioDelQueue')
-}
-
-export async function getBioDeletionQueue() {
-  return (await (await db()).get('meta', 'bioDelQueue')) || []
-}
-
-// Tira da fila os pedidos já enviados (só se não houve um pedido mais recente do mesmo trabalhador entretanto).
-export async function clearBioDeletions(done) {
-  const d = await db()
-  const q = (await d.get('meta', 'bioDelQueue')) || []
-  await d.put('meta', q.filter((x) => !done.some((y) => y.sageId === x.sageId && y.at === x.at)), 'bioDelQueue')
-}
-
-// Lápides já vistas ({ sageId: momento do apagar }) e a versão da lista que o relay deu: impedem que se volte a importar biometria
-// apagada e permitem não pedir a lista inteira de cada vez.
-export async function getBioTombs() {
-  const d = await db()
-  return { map: (await d.get('meta', 'bioTombs')) || {}, version: (await d.get('meta', 'bioTombVersion')) || '' }
-}
-
-export async function saveBioTombs(map, version) {
-  const d = await db()
-  await d.put('meta', map, 'bioTombs')
-  await d.put('meta', version, 'bioTombVersion')
 }
 
 // --- Contador e deslocamento de relógio ---
@@ -253,6 +191,17 @@ export async function getClockOffset() {
 export async function setClockOffset(ms) {
   const d = await db()
   await d.put('meta', ms, 'clockOffset')
+}
+
+// --- Chave do dispositivo (ECDSA P-256, não exportável): assina os pedidos ao relay. Fica na IndexedDB como CryptoKey, nunca em texto ---
+export async function getDeviceKeys() {
+  const d = await db()
+  return (await d.get('meta', 'deviceKeys')) || null
+}
+
+export async function saveDeviceKeys(keys) {
+  const d = await db()
+  await d.put('meta', keys, 'deviceKeys')
 }
 
 // --- Fila de picagens ---

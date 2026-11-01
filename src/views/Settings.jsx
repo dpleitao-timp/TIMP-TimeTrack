@@ -8,14 +8,25 @@ import { fmtDateTime } from '../lib/date.js'
 import { diagCount, diagText } from '../lib/diag.js'
 import { applyOrientation, canLock, currentOrientation } from '../lib/orientation.js'
 import { initHuman, similarity } from '../lib/face.js'
-import { thresholdFor, isBioConfigured } from '../lib/settings.js'
-import { syncBiometrics } from '../lib/bio.js'
+import { thresholdFor, missingFields, loadSettings } from '../lib/settings.js'
+import { enrollWithCode } from '../lib/relay.js'
 import { evaluate } from '../lib/evaluate.js'
 
 export default function Settings({ settings, onChange }) {
   const { t } = useT()
   const [s, setS] = useState(settings)
   const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('') // campos obrigatórios por preencher (não se guarda)
+  const [newCode, setNewCode] = useState(false) // tablet já ligado: a introduzir um código novo (ligar de novo)
+  // se o tablet se ligou entretanto (os tablets antigos ligam-se sozinhos, em segundo plano), a cópia das definições desta página acerta-se
+  useEffect(() => {
+    const sync = () => {
+      const c = loadSettings()
+      setS((x) => ({ ...x, enrolled: c.enrolled, deviceToken: c.deviceToken }))
+    }
+    window.addEventListener('settings-changed', sync)
+    return () => window.removeEventListener('settings-changed', sync)
+  }, [])
   const [theme, setThemeState] = useState(getTheme())
   const [cameras, setCameras] = useState([])
   const [roster, setRoster] = useState({ n: 0, at: 0 })
@@ -60,7 +71,35 @@ export default function Settings({ settings, onChange }) {
 
   async function save() {
     const reload = s.engine !== settings.engine || s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
-    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), thresholdSface: Number(s.thresholdSface) }
+    // sem espaços nas pontas (uma colagem com um espaço a mais deixava o token ou o endereço inválidos)
+    const next = { ...s, deviceName: (s.deviceName || '').trim(), deviceId: (s.deviceId || '').trim(), relayUrl: (s.relayUrl || '').trim(), deviceToken: (s.deviceToken || '').trim(), obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), thresholdSface: Number(s.thresholdSface) }
+    // O que está guardado manda no estado "ligado" (a cópia desta página pode estar atrasada).
+    if (loadSettings().enrolled === true && !newCode) {
+      next.enrolled = true
+      next.deviceToken = ''
+    }
+    // Os campos obrigatórios têm de estar preenchidos: sem eles o tablet não pica (ver missingFields), por isso não se guarda assim.
+    const missing = missingFields(next)
+    if (missing.length) {
+      setMsg('')
+      return setErr(t('settings.required', { list: missing.map((k) => t(`settings.${k}`)).join(', ') }))
+    }
+    setErr('')
+    // Código de instalação por gastar (tablet novo, ligar de novo, ou token de uma versão antiga): liga o tablet ao relay agora. Se
+    // falhar, não se guarda nada, para o tablet não ficar com um código escrito que não serve.
+    if (next.deviceToken) {
+      setMsg(t('settings.enrolling'))
+      try {
+        await enrollWithCode(next, next.deviceToken)
+      } catch (e) {
+        setMsg('')
+        return setErr(e.code === 'invalid_enrollment' ? t('settings.enrollBad') : t('settings.enrollError', { err: e.message || String(e) }))
+      }
+      next.enrolled = true
+      next.deviceToken = '' // o código já não serve e não fica guardado
+      setS((x) => ({ ...x, enrolled: true, deviceToken: '' }))
+      setNewCode(false)
+    }
     onChange(next)
     setMsg(t('settings.saved'))
     if (next.obra.toLowerCase() !== (settings.obra || '').trim().toLowerCase()) {
@@ -81,18 +120,6 @@ export default function Settings({ settings, onChange }) {
     setRosterMsg(r.ok ? t('settings.rosterOk') : t('settings.rosterError', { err: r.error }))
     await loadRoster()
     if (r.ok) window.dispatchEvent(new Event('roster-updated'))
-  }
-
-  // Biometria: envia a que falta enviar e vai buscar a dos trabalhadores da obra que o tablet não tem (ver bio.js)
-  const [bioMsg, setBioMsg] = useState('')
-  const bioRefresh = async () => {
-    setBioMsg('')
-    const cfg = { ...settings, ...s, obra: (s.obra || '').trim() }
-    if (!isBioConfigured(cfg)) return setBioMsg(t('settings.bioNoKey'))
-    setBioMsg(t('settings.bioWorking'))
-    const r = await syncBiometrics(cfg)
-    setBioMsg(r.error ? t('settings.bioError', { err: r.error }) : t(r.failed ? 'settings.bioResultFailed' : 'settings.bioResult', { sent: r.sent ?? 0, received: r.received ?? 0, failed: r.failed ?? 0, deleted: r.deleted ?? 0 }))
-    if (r.received) window.dispatchEvent(new Event('roster-updated'))
   }
 
   const detectCameras = async () => {
@@ -126,15 +153,15 @@ export default function Settings({ settings, onChange }) {
           <section className="card">
             <h2>{t('settings.device')}</h2>
             <label className="field">
-              {t('settings.deviceName')}
+              {t('settings.deviceName')} *
               <input className="field-input" value={s.deviceName} onChange={set('deviceName')} />
             </label>
             <label className="field">
-              {t('settings.deviceId')}
-              <input className="field-input" value={s.deviceId} onChange={set('deviceId')} />
+              {t('settings.deviceId')} *
+              <input className="field-input" value={s.deviceId} onChange={set('deviceId')} readOnly={!!s.enrolled && !newCode} />
             </label>
             <label className="field">
-              {t('settings.obra')}
+              {t('settings.obra')} *
               <input className="field-input" value={s.obra} onChange={set('obra')} maxLength={64} />
               <small>{t('settings.obraHint')}</small>
             </label>
@@ -181,22 +208,24 @@ export default function Settings({ settings, onChange }) {
             <h2>{t('settings.sending')}</h2>
             <p className="muted" style={{ marginTop: 0 }}>{t('settings.sendingHint')}</p>
             <label className="field">
-              {t('settings.relayUrl')}
+              {t('settings.relayUrl')} *
               <input className="field-input" value={s.relayUrl} onChange={set('relayUrl')} placeholder="https://punch-relay.exemplo.com" />
             </label>
-            <label className="field">
-              {t('settings.deviceToken')}
-              <input className="field-input" type="password" value={s.deviceToken} onChange={set('deviceToken')} />
-            </label>
-            <label className="field">
-              {t('settings.bioKey')}
-              <input className="field-input" type="password" value={s.bioKey || ''} onChange={set('bioKey')} autoComplete="off" />
-              <small>{t('settings.bioKeyHint')}</small>
-            </label>
-            <button type="button" className="btn btn-secondary btn-small" onClick={bioRefresh}>
-              {t('settings.bioSync')}
-            </button>
-            {bioMsg && <p className="muted">{bioMsg}</p>}
+            {s.enrolled && !newCode ? (
+              <div className="field">
+                {t('settings.deviceToken')} *
+                <p className="settings-status">✔ {t('settings.enrolled')}</p>
+                <button type="button" className="btn btn-secondary btn-small" onClick={() => setNewCode(true)}>
+                  {t('settings.enrollNew')}
+                </button>
+              </div>
+            ) : (
+              <label className="field">
+                {t('settings.deviceToken')} *
+                <input className="field-input" value={s.deviceToken} onChange={set('deviceToken')} autoComplete="off" autoCapitalize="characters" spellCheck={false} />
+                <small>{t('settings.deviceTokenHint')}</small>
+              </label>
+            )}
           </section>
 
           <section className="card">
@@ -330,6 +359,7 @@ export default function Settings({ settings, onChange }) {
       </div>
 
       <div className="settings-save">
+        {err && <p className="notice notice-warn">{err}</p>}
         {msg && <p className="notice notice-ok">{msg}</p>}
         <button className="btn btn-primary btn-block" onClick={save}>{t('settings.save')}</button>
       </div>

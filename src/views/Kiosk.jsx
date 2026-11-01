@@ -4,7 +4,7 @@ import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
 import { listWorkers, enqueuePunch, punchStatus } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
-import { bumpStat } from '../lib/settings.js'
+import { bumpStat, missingFields } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
 import { diagStart, diagPush, videoInfo, faceNoise } from '../lib/diag.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
@@ -27,8 +27,13 @@ const DIRS = {
 }
 
 // Ecrã de escolha: a câmara só liga depois de escolher Entrada ou Saída.
+// hasAdmin: null enquanto se verifica, depois true/false (há um Administrador utilizável?).
 export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
   const { t } = useT()
+  // O tablet só pica com um Administrador registado e com os campos obrigatórios das Definições preenchidos (ver missingFields).
+  const missing = missingFields(settings)
+  const ready = hasAdmin === true && !missing.length
+  const list = missing.map((k) => t(`settings.${k}`)).join(', ')
   const [direction, setDirection] = useState(null) // null | 'in' | 'out' | 'meal_out' | 'meal_in'
   const [adminLogin, setAdminLogin] = useState(false)
   const [modelsError, setModelsError] = useState('')
@@ -68,18 +73,24 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
     <div className="kiosk-wrap">
       <div className="choice">
         {modelsState === 'loading' && <p className="muted preparing">⏳ {t('kiosk.preparing')}</p>}
-        {!settings.obra?.trim() && <p className="notice notice-warn">{t('kiosk.noObra')}</p>}
+        {hasAdmin !== null && !ready && (
+          <div className="notice notice-warn">
+            <strong>{t('kiosk.setupTitle')}</strong>
+            {!hasAdmin && <div>{t('kiosk.setupNeedAdmin')}</div>}
+            {missing.length > 0 && <div>{t(hasAdmin ? 'kiosk.setupFieldsAdmin' : 'kiosk.setupFields', { list })}</div>}
+          </div>
+        )}
         {/* Uma só linha, por esta ordem: Entrada, Saída para almoço/jantar, Entrada de almoço/jantar, Saída. Cores: verde = entrada,
             vermelho = saída. Os botões têm todos o mesmo tamanho. Num tablet só de entradas ou só de saídas mostram-se os que se aplicam. */}
         <div className={`choice-buttons ${settings.mealPunches ? 'has-meal' : ''}`}>
           {settings.mode !== 'out' && (
-            <button type="button" className="choice-btn in" disabled={!settings.obra?.trim()} onClick={() => setDirection('in')}>
+            <button type="button" className="choice-btn in" disabled={!ready} onClick={() => setDirection('in')}>
               <IconIn size={ico} />
               <span>{t('dir.in')}</span>
             </button>
           )}
           {settings.mealPunches && settings.mode !== 'in' && (
-            <button type="button" className="choice-btn meal-out" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_out')}>
+            <button type="button" className="choice-btn meal-out" disabled={!ready} onClick={() => setDirection('meal_out')}>
               <span className="choice-icons">
                 <IconMeal size={ico} />
                 <IconOut size={ico} />
@@ -88,7 +99,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
             </button>
           )}
           {settings.mealPunches && settings.mode !== 'out' && (
-            <button type="button" className="choice-btn meal-in" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_in')}>
+            <button type="button" className="choice-btn meal-in" disabled={!ready} onClick={() => setDirection('meal_in')}>
               <span className="choice-icons">
                 <IconMeal size={ico} />
                 <IconIn size={ico} />
@@ -97,7 +108,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock }) {
             </button>
           )}
           {settings.mode !== 'in' && (
-            <button type="button" className="choice-btn out" disabled={!settings.obra?.trim()} onClick={() => setDirection('out')}>
+            <button type="button" className="choice-btn out" disabled={!ready} onClick={() => setDirection('out')}>
               <IconOut size={ico} />
               <span>{t('dir.out')}</span>
             </button>

@@ -1,6 +1,6 @@
 import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta } from './db.js'
 import { isCloudConfigured } from './settings.js'
-import { flushBiometrics, flushBioDeletions } from './bio.js'
+import { relayRequest } from './relay.js'
 
 const BATCH = 50
 let running = false
@@ -13,7 +13,6 @@ export async function flushQueue(settings) {
   let sent = 0
   let left = null // quantas ficam por enviar, quando o ciclo o sabe sem reler a fila (0 se acabou com a fila vazia)
   try {
-    const url = `${settings.relayUrl.replace(/\/$/, '')}/punch`
     for (;;) {
       const batch = (await pendingPunches()).slice(0, BATCH)
       if (!batch.length) {
@@ -24,26 +23,19 @@ export async function flushQueue(settings) {
       markSending(ids) // enquanto estão a ser enviadas, não se podem apagar
       try {
         const t0 = Date.now()
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-device-token': settings.deviceToken,
-          },
-          body: JSON.stringify({
-            deviceId: settings.deviceId,
-            punches: batch.map((p) => ({
-              eventId: p.eventId,
-              sageId: p.sageId ?? p.workerId, // registos antigos da fila usavam workerId
-              obra: p.obra ?? '', // picagens antigas sem obra são recusadas pelo relay
-              direction: p.direction,
-              punchedAt: p.punchedAt,
-              confidence: p.confidence,
-              second: p.second ?? null,
-              real: p.real ?? null,
-              live: p.live ?? null,
-            })),
-          }),
+        const res = await relayRequest(settings, 'POST', '/punch', {
+          deviceId: settings.deviceId,
+          punches: batch.map((p) => ({
+            eventId: p.eventId,
+            sageId: p.sageId ?? p.workerId, // registos antigos da fila usavam workerId
+            obra: p.obra ?? '', // picagens antigas sem obra são recusadas pelo relay
+            direction: p.direction,
+            punchedAt: p.punchedAt,
+            confidence: p.confidence,
+            second: p.second ?? null,
+            real: p.real ?? null,
+            live: p.live ?? null,
+          })),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const body = await res.json()
@@ -79,11 +71,7 @@ async function flushVoids(settings) {
   for (let i = 0; i < voids.length; i += BATCH) {
     const ids = voids.slice(i, i + BATCH).map((p) => p.eventId)
     try {
-      const res = await fetch(`${settings.relayUrl.replace(/\/$/, '')}/punch/delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-device-token': settings.deviceToken },
-        body: JSON.stringify({ deviceId: settings.deviceId, eventIds: ids }),
-      })
+      const res = await relayRequest(settings, 'POST', '/punch/delete', { deviceId: settings.deviceId, eventIds: ids })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body = await res.json()
       await clearVoids(body.accepted ?? ids)
@@ -104,7 +92,7 @@ export async function syncRoster(settings, { force = false } = {}) {
     // Mudou a obra do tablet: a lista guardada é de outra obra, por isso lê-se sempre de novo (o "gen" é global e diria "sem alterações").
     const sameObra = storedObra.toLowerCase() === obra.toLowerCase()
     const qs = new URLSearchParams({ device: settings.deviceId, obra, since: force || !sameObra ? '0' : String(gen) })
-    const res = await fetch(`${settings.relayUrl.replace(/\/$/, '')}/roster?${qs}`, { headers: { 'x-device-token': settings.deviceToken } })
+    const res = await relayRequest(settings, 'GET', `/roster?${qs}`)
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
     const body = await res.json()
     if (body.unchanged) {
@@ -122,8 +110,6 @@ export async function syncRoster(settings, { force = false } = {}) {
 export function startAutoSync(getSettings, onResult) {
   const run = async () => {
     onResult?.(await flushQueue(getSettings()))
-    // a biometria nova e os apagamentos seguem pelo mesmo caminho (só se houver chave da frota e algo por enviar); apagar primeiro
-    flushBioDeletions(getSettings()).then(() => flushBiometrics(getSettings()))
   }
   const timer = setInterval(run, 20000)
   window.addEventListener('online', run)

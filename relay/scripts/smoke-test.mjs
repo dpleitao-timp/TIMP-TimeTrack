@@ -1,9 +1,15 @@
 // Teste de fumo do relay. Usa o mesmo esquema de assinatura da Edge Function pull-punches.
-//   RELAY=http://127.0.0.1:8787 DEVICE=dev-test TOKEN=<token> SECRET=<PULL_SECRET> node relay/scripts/smoke-test.mjs
+//   RELAY=http://127.0.0.1:8787 DEVICE=dev-test CODE=<código de instalação> SECRET=<PULL_SECRET> node relay/scripts/smoke-test.mjs
+// O dispositivo tem de ter a obra OBRA-TESTE no relay. O teste liga-o com o código de instalação (uso único; depois usa a chave guardada em
+// KEYDIR, ver _device.mjs). Opcionais: DEVICE_NO_OBRA e CODE_NO_OBRA (dispositivo SEM obra); DEVICE_FRESH e CODE_FRESH (por ligar, para
+// testar a ligação); DEVICE_EXPIRED e CODE_EXPIRED (código caducado); DEVICE_REVOKED e CODE_REVOKED (dispositivo revogado).
 import { createHmac } from 'node:crypto'
+import { loadClient, enroll, newKeys } from './_device.mjs'
 
-const { RELAY = 'http://127.0.0.1:8787', DEVICE = 'dev-test', TOKEN, SECRET } = process.env
-if (!TOKEN || !SECRET) throw new Error('Defina TOKEN e SECRET')
+const { RELAY = 'http://127.0.0.1:8787', DEVICE = 'dev-test', CODE, SECRET, DEVICE_NO_OBRA, CODE_NO_OBRA, DEVICE_FRESH, CODE_FRESH, DEVICE_EXPIRED, CODE_EXPIRED, DEVICE_REVOKED, CODE_REVOKED } = process.env
+if (!SECRET) throw new Error('Defina SECRET (e CODE, ou uma chave já guardada em KEYDIR)')
+const dev = await loadClient(RELAY, DEVICE, CODE) // o tablet de teste, ligado ao relay
+const noObraDev = DEVICE_NO_OBRA ? await loadClient(RELAY, DEVICE_NO_OBRA, CODE_NO_OBRA) : null
 
 let failed = 0
 const check = (name, ok, extra = '') => {
@@ -32,8 +38,7 @@ const punch = (counter, over = {}) => ({
   confidence: 0.91,
   ...over,
 })
-const post = (body, token = TOKEN) =>
-  fetch(`${RELAY}/punch`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-device-token': token }, body: JSON.stringify(body) })
+const post = (body, opts) => dev.req('POST', '/punch', body, opts)
 
 const base = Date.now() % 900000 // evita colisões entre execuções
 
@@ -48,10 +53,12 @@ j = await r.json()
 check('saída e entrada de almoço/jantar são aceites', r.status === 200 && j.accepted.length === 2 && j.rejected.length === 0, JSON.stringify(j))
 
 // 2. autenticação do tablet
-r = await post({ deviceId: DEVICE, punches: [punch(base + 2)] }, 'token-errado')
-check('token errado → 401', r.status === 401)
-r = await post({ deviceId: 'dev-inexistente', punches: [punch(base + 3, { eventId: `dev-inexistente-${base}` })] })
+r = await post({ deviceId: DEVICE, punches: [punch(base + 2)] }, { badSig: true })
+check('assinatura inválida → 401', r.status === 401)
+r = await post({ deviceId: 'dev-inexistente', punches: [punch(base + 3, { eventId: `dev-inexistente-${base}` })] }, { id: 'dev-inexistente' })
 check('dispositivo desconhecido → 401', r.status === 401)
+r = await post({ deviceId: 'dev-inexistente', punches: [punch(base + 3)] })
+check('o id do corpo tem de ser o do dispositivo que assina → 400', r.status === 400, String(r.status))
 
 // 3. validação
 r = await post({
@@ -63,14 +70,27 @@ r = await post({
     punch(base + 7, { sageId: '  ' }),
     punch(base + 8, { obra: '' }),
     punch(base + 9, { obra: undefined }),
+    punch(base + 10, { obra: 'OUTRA-OBRA' }),
   ],
 })
 j = await r.json()
-check('picagens inválidas rejeitadas (ID alheio, futuro, direção, SAGE ID vazio, sem obra)', j.rejected.length === 6, JSON.stringify(j))
+check('picagens inválidas rejeitadas (ID alheio, futuro, direção, SAGE ID vazio, sem obra, obra que não é a do dispositivo)', j.rejected.length === 7, JSON.stringify(j))
+// a obra compara-se sem maiúsculas nem espaços, e fica gravada a do dispositivo
+r = await post({ deviceId: DEVICE, punches: [punch(base + 11, { obra: '  obra-teste ' })] })
+j = await r.json()
+check('a obra do dispositivo compara-se sem maiúsculas nem espaços', r.status === 200 && j.accepted.length === 1 && j.rejected.length === 0, JSON.stringify(j))
+r = await signed('GET', '/pull?limit=50')
+j = await r.json()
+check('a picagem fica gravada com a obra do dispositivo', j.punches.find((p) => p.eventId === `${DEVICE}-${String(base + 11).padStart(6, '0')}`)?.obra === 'OBRA-TESTE', JSON.stringify(j).slice(0, 160))
+await signed('POST', '/ack', JSON.stringify({ eventIds: [`${DEVICE}-${String(base + 11).padStart(6, '0')}`] }))
+if (noObraDev) {
+  r = await noObraDev.req('POST', '/punch', { deviceId: DEVICE_NO_OBRA, punches: [punch(base + 12, { eventId: `${DEVICE_NO_OBRA}-${String(base + 12).padStart(6, '0')}` })] })
+  check('dispositivo sem obra no relay não pode picar → 403', r.status === 403, String(r.status))
+}
 
 // 4. o tablet não consegue ler
-r = await fetch(`${RELAY}/pull?limit=10`, { headers: { 'x-device-token': TOKEN } })
-check('token do tablet não serve para /pull → 401', r.status === 401)
+r = await dev.req('GET', '/pull?limit=10')
+check('a chave do tablet não serve para /pull (só a assinatura do Supabase) → 401', r.status === 401)
 r = await signed('GET', '/pull?limit=10', '', { badSig: true })
 check('assinatura inválida → 401', r.status === 401)
 r = await signed('GET', '/pull?limit=10', '', { ts: Math.floor(Date.now() / 1000) - 3600 })
@@ -98,13 +118,13 @@ const roster = [
   { sageId: 'S4', name: 'Diogo Reis', obra: 'OUTRA-OBRA', active: true },
   { sageId: '', name: 'sem id', obra: 'OBRA-TESTE', active: true },
 ]
-r = await fetch(`${RELAY}/roster`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-device-token': TOKEN }, body: JSON.stringify({ gen, final: true, workers: roster }) })
+r = await dev.req('POST', '/roster', { gen, final: true, workers: roster })
 check('tablet não pode publicar a lista → 401', r.status === 401)
 const body = JSON.stringify({ gen, final: true, workers: roster })
 r = await signed('POST', '/roster', body)
 j = await r.json()
 check('Supabase publica a lista assinada (4 válidos, 1 recusado)', r.status === 200 && j.stored === 4 && j.rejected === 1, JSON.stringify(j))
-const getRoster = (qs, token = TOKEN) => fetch(`${RELAY}/roster?device=${DEVICE}${qs}`, { headers: { 'x-device-token': token } })
+const getRoster = (qs, opts) => dev.req('GET', `/roster?device=${DEVICE}${qs}`, undefined, opts)
 r = await getRoster('&obra=OBRA-TESTE')
 j = await r.json()
 check('tablet lê só os ativos da sua obra, por nome', r.status === 200 && j.workers.map((w) => w.sageId).join() === 'S1,S2' && j.workers.every((w) => !('obra' in w)), JSON.stringify(j))
@@ -113,10 +133,18 @@ r = await getRoster('&obra=%20obra-teste%20')
 check('a obra compara-se sem maiúsculas nem espaços', (await r.json()).workers?.length === 2)
 r = await getRoster(`&obra=OBRA-TESTE&since=${genOut}`)
 check('sem alterações devolve unchanged', (await r.json()).unchanged === true)
-r = await getRoster('&obra=OBRA-TESTE', 'token-errado')
-check('token errado na lista → 401', r.status === 401)
+r = await getRoster('&obra=OBRA-TESTE', { badSig: true })
+check('assinatura inválida na lista → 401', r.status === 401)
+r = await getRoster('&obra=OUTRA-OBRA')
+j = await r.json()
+check('o tablet não escolhe a obra: pedir outra devolve a lista da obra do dispositivo', r.status === 200 && j.workers.map((w) => w.sageId).join() === 'S1,S2', JSON.stringify(j))
 r = await getRoster('')
-check('sem obra → 400', r.status === 400)
+j = await r.json()
+check('sem indicar obra usa a do dispositivo', r.status === 200 && j.workers.length === 2, JSON.stringify(j))
+if (noObraDev) {
+  r = await noObraDev.req('GET', `/roster?device=${DEVICE_NO_OBRA}&obra=OBRA-TESTE`)
+  check('dispositivo sem obra no relay não lê a lista → 403', r.status === 403, String(r.status))
+}
 const body2 = JSON.stringify({ gen: gen + 1, final: true, workers: [{ sageId: 'S2', name: 'Bruno C.', obra: 'OBRA-TESTE', active: true }] })
 r = await signed('POST', '/roster', body2)
 r = await getRoster('&obra=OBRA-TESTE')
@@ -126,13 +154,12 @@ r = await signed('POST', '/roster', JSON.stringify({ gen: gen + 2, final: true, 
 check('lista vazia limpa tudo', ((await (await getRoster('&obra=OBRA-TESTE')).json()).workers || []).length === 0)
 
 // 7. apagar picagens: o tablet pede, o Supabase lê o pedido e confirma
-const del = (body, token = TOKEN) =>
-  fetch(`${RELAY}/punch/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-device-token': token }, body: JSON.stringify(body) })
+const del = (body, opts) => dev.req('POST', '/punch/delete', body, opts)
 const d1 = `${DEVICE}-${String(base + 100).padStart(6, '0')}`
 const d2 = `${DEVICE}-${String(base + 101).padStart(6, '0')}`
 await post({ deviceId: DEVICE, punches: [punch(base + 100), punch(base + 101)] })
-r = await del({ deviceId: DEVICE, eventIds: [d1, `outro-${base}`] }, 'token-errado')
-check('apagar com token errado → 401', r.status === 401)
+r = await del({ deviceId: DEVICE, eventIds: [d1, `outro-${base}`] }, { badSig: true })
+check('apagar com assinatura inválida → 401', r.status === 401)
 r = await del({ deviceId: DEVICE, eventIds: [d1, `outro-${base}`] })
 j = await r.json()
 check('só aceita apagar picagens do próprio dispositivo', r.status === 200 && j.accepted.length === 1 && j.accepted[0] === d1, JSON.stringify(j))
@@ -140,8 +167,8 @@ r = await signed('GET', '/pull?limit=50')
 j = await r.json()
 const left = (j.punches || []).map((p) => p.eventId)
 check('a picagem apagada sai do relay se ainda lá estava', !left.includes(d1) && left.includes(d2), JSON.stringify(left))
-r = await fetch(`${RELAY}/pull-deletions`, { headers: { 'x-device-token': TOKEN } })
-check('token do tablet não serve para /pull-deletions → 401', r.status === 401)
+r = await dev.req('GET', '/pull-deletions')
+check('a chave do tablet não serve para /pull-deletions → 401', r.status === 401)
 r = await signed('GET', '/pull-deletions')
 j = await r.json()
 check('Supabase lê o pedido de apagar', r.status === 200 && j.deletions.some((x) => x.eventId === d1 && x.deviceId === DEVICE), JSON.stringify(j))
@@ -164,6 +191,63 @@ const g2 = j.punches.find((p) => p.eventId === r2)
 check('o Supabase recebe second/real/live', g1?.second === 0.42 && g1?.real === 0.7 && g1?.live === 0.8, JSON.stringify(g1))
 check('valores fora de 0..1 ou não numéricos chegam como null', g2 && g2.second === null && g2.real === null && g2.live === null, JSON.stringify(g2))
 await signed('POST', '/ack', JSON.stringify({ eventIds: [r1, r2] })) // limpeza
+
+// 9. chave por dispositivo: repetir, hora, corpo adulterado, outra chave, token antigo, e a ligação (enrol) com o código de uso único
+const roster9 = `/roster?device=${DEVICE}&obra=OBRA-TESTE`
+const NONCE = ('N' + Date.now().toString(36) + Math.random().toString(36).slice(2)).padEnd(20, 'x') // novo a cada execução (o relay guarda os nonces 10 minutos)
+r = await dev.req('GET', roster9, undefined, { nonce: NONCE })
+check('pedido assinado com um nonce novo passa', r.status === 200, String(r.status))
+r = await dev.req('GET', roster9, undefined, { nonce: NONCE })
+j = await r.json().catch(() => ({}))
+check('repetir o mesmo pedido assinado (mesmo nonce) → 401 replay', r.status === 401 && j.error === 'replay', JSON.stringify(j))
+r = await dev.req('GET', roster9, undefined, { ts: Math.floor(Date.now() / 1000) - 3600 })
+j = await r.json().catch(() => ({}))
+check('hora muito desacertada → 401 bad_timestamp com a hora do relay (o tablet acerta-se)', r.status === 401 && j.error === 'bad_timestamp' && Number.isFinite(Date.parse(j.serverTime)), JSON.stringify(j))
+r = await dev.req('POST', '/punch', { deviceId: DEVICE, punches: [punch(base + 300)] }, { signBody: { deviceId: DEVICE, punches: [punch(base + 301)] } })
+check('corpo diferente do que foi assinado → 401', r.status === 401, String(r.status))
+r = await post({ deviceId: DEVICE, punches: [punch(base + 302)] }, { id: DEVICE_NO_OBRA || 'dev-outro' })
+check('assinar com a chave de um dispositivo e dizer que é outro → 401', r.status === 401, String(r.status))
+r = await fetch(`${RELAY}/punch`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-device-token': 'um-token-qualquer' }, body: JSON.stringify({ deviceId: DEVICE, punches: [punch(base + 303)] }) })
+check('o token antigo já não autentica nada → 401', r.status === 401, String(r.status))
+r = await fetch(`${RELAY}/punch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'x'.repeat(300000) })
+check('corpo acima do limite → 413 sem o ler (e sem autenticar)', r.status === 413, String(r.status))
+
+// a biometria já não passa pelo relay: os pedidos que a transportavam deixaram de existir
+for (const [method, path] of [['POST', '/biometrics'], ['POST', '/bio-fetch'], ['POST', '/bio-delete'], ['POST', '/bio-deleted']]) {
+  r = await dev.req(method, path, { deviceId: DEVICE })
+  check(`${path} já não existe → 404`, r.status === 404, String(r.status))
+}
+for (const [method, path] of [['GET', '/pull-bio'], ['GET', '/pull-bio-deletions']]) {
+  r = await signed(method, path)
+  check(`${path} já não existe → 404`, r.status === 404, String(r.status))
+}
+
+if (DEVICE_FRESH && CODE_FRESH) {
+  const keys = await newKeys()
+  r = await enroll(RELAY, DEVICE_FRESH, 'ZZZZ-ZZZZ-ZZZZ-ZZZZ', keys)
+  check('ligar com o código errado → 401', r.status === 401, String(r.status))
+  r = await enroll(RELAY, DEVICE_FRESH, CODE_FRESH, keys, { proofKeys: await newKeys() })
+  check('ligar com uma prova que não é da chave enviada → 401 (e o código não se gasta)', r.status === 401, String(r.status))
+  r = await enroll(RELAY, DEVICE_FRESH, CODE_FRESH, keys, { ts: Math.floor(Date.now() / 1000) - 3600 })
+  j = await r.json().catch(() => ({}))
+  check('ligar com a hora desacertada → bad_timestamp', r.status === 401 && j.error === 'bad_timestamp', JSON.stringify(j))
+  r = await enroll(RELAY, DEVICE_FRESH, CODE_FRESH.toLowerCase(), keys) // o código aceita-se em minúsculas e com hífenes
+  check('ligar com o código certo (escrito em minúsculas) → 200', r.status === 200 && (await r.json()).ok === true, String(r.status))
+  r = await enroll(RELAY, DEVICE_FRESH, CODE_FRESH, await newKeys())
+  check('o código gasta-se: usá-lo outra vez → 401', r.status === 401, String(r.status))
+  const { client } = await import('./_device.mjs')
+  const fresh = client(RELAY, DEVICE_FRESH, keys)
+  r = await fresh.req('GET', `/roster?device=${DEVICE_FRESH}`)
+  check('o dispositivo ligado assina pedidos (sem obra no relay → 403, não 401)', r.status === 403, String(r.status))
+}
+if (DEVICE_EXPIRED && CODE_EXPIRED) {
+  r = await enroll(RELAY, DEVICE_EXPIRED, CODE_EXPIRED, await newKeys())
+  check('código caducado → 401', r.status === 401, String(r.status))
+}
+if (DEVICE_REVOKED && CODE_REVOKED) {
+  r = await enroll(RELAY, DEVICE_REVOKED, CODE_REVOKED, await newKeys())
+  check('dispositivo revogado não se liga → 401', r.status === 401, String(r.status))
+}
 
 console.log(failed ?`\n${failed} teste(s) falharam` : '\nTudo OK')
 process.exit(failed ? 1 : 0)

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, bestMatch, meanEmbedding } from '../lib/face.js'
-import { engineTag, thresholdFor, isBioConfigured } from '../lib/settings.js'
+import { engineTag, thresholdFor } from '../lib/settings.js'
 import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin, isUsable, listRoster, rosterMeta } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
@@ -206,7 +206,7 @@ export default function Enrol({ settings, onRegistered }) {
     if (strong) {
       const typed = prompt(t('enrol.confirmDeleteAdmin', { name: w.name, id: w.id }))
       if (typed === null || typed.trim() !== w.id) return
-    } else if (!confirm(t(isBioConfigured(settings) ? 'enrol.confirmDeleteAll' : 'enrol.confirmDelete', { name: w.name }))) {
+    } else if (!confirm(t('enrol.confirmDelete', { name: w.name }))) {
       return
     }
     try {

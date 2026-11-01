@@ -14,9 +14,9 @@ const DEFAULTS = {
   mealPunches: false, // mostra também "saída para almoço/jantar" e "entrada de almoço/jantar" (opcional, por tablet)
   deviceName: 'Tablet 1',
   deviceId: '',
-  deviceToken: '',
+  deviceToken: '', // código de instalação (uso único) até o tablet se ligar; depois fica vazio (ver relay.js)
+  enrolled: false, // o tablet já se ligou ao relay: tem uma chave própria, que o relay conhece (ver relay.js)
   relayUrl: '', // relay Cloudflare onde o tablet escreve (o Supabase vai lá buscar)
-  bioKey: '', // chave da frota: frase-passe que cifra a biometria que sai do tablet (a mesma em todos; ver bio.js). Vazia = a biometria não viaja
   engine: 'faceres', // motor de reconhecimento
   threshold: 0.55, // similaridade mínima do FaceRes (0..1)
   thresholdSface: 0.45, // semelhança mínima do SFace (cosseno, -1..1): escala diferente da do FaceRes, não se aproveitam os valores
@@ -49,6 +49,11 @@ export function loadSettings() {
   if ('supabaseUrl' in s || 'supabaseAnonKey' in s) {
     delete merged.supabaseUrl
     delete merged.supabaseAnonKey
+    saveSettings(merged)
+  }
+  // A biometria já não sai do tablet (a partilha entre tablets foi retirada): apaga a chave da frota, que estava guardada em claro.
+  if ('bioKey' in s) {
+    delete merged.bioKey
     saveSettings(merged)
   }
   // o repouso passou a ser a norma (sem horário nem fim de semana): apaga as definições antigas
@@ -103,6 +108,11 @@ export function bumpStat(name, ms) {
 }
 export const resetStats = () => localStorage.removeItem(STATS_KEY)
 
-export const isCloudConfigured = (s) => !!(s.relayUrl && s.deviceToken)
-// A biometria só viaja se o tablet tem relay e a chave da frota (frase-passe com pelo menos 8 caracteres, igual em todos os tablets)
-export const isBioConfigured = (s) => isCloudConfigured(s) && (s.bioKey || '').length >= 8
+// O tablet fala com o relay se tem o endereço e uma credencial: a chave própria (enrolled) ou, nos tablets das versões anteriores, o token.
+export const hasCredential = (s) => s.enrolled === true || !!String(s.deviceToken ?? '').trim()
+export const isCloudConfigured = (s) => !!(s.relayUrl && hasCredential(s))
+
+// Campos sem os quais o tablet não funciona (não pica): dizem quem é, onde está e como fala com o relay.
+export const REQUIRED_FIELDS = ['deviceName', 'deviceId', 'obra', 'relayUrl', 'deviceToken']
+// Os que faltam, pela ordem das Definições. O "token" é o código de instalação: está satisfeito se o tablet já se ligou ao relay.
+export const missingFields = (s) => REQUIRED_FIELDS.filter((k) => (k === 'deviceToken' ? !hasCredential(s) : !String(s[k] ?? '').trim()))

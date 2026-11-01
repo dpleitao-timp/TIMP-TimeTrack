@@ -197,6 +197,17 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .btn-small { min-height: 40px; padding: 0 14px; font-size: 0.9rem; border-radius: 12px; }
 .link-button { background: none; border: 0; padding: 0; color: var(--link); font-weight: 600; font-size: inherit; text-decoration: underline; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Botões quadrados só com ícone (lista de trabalhadores) */
+.row-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+.icon-btn:hover:not(:disabled) { background: rgba(127, 127, 127, 0.12); }
+.icon-btn.on { color: #1a7f45; border-color: currentColor; background: rgba(26, 127, 69, 0.1); }
+.icon-btn.danger { color: #b42318; }
+.icon-btn.danger:hover:not(:disabled) { background: rgba(180, 35, 24, 0.1); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.stale-flag { display: inline-flex; vertical-align: middle; color: #b54708; }
+.stale-flag svg { width: 18px; height: 18px; }
+
 
 /* ---------------------------------------------------------------- forms */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; color: var(--text-muted); font-size: 0.9rem; }
@@ -228,6 +239,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 .settings-adv[open] summary h2::after { transform: rotate(180deg); }
 .settings-adv[open] summary { margin-bottom: 14px; }
 .settings-adv summary small { color: var(--text-muted); font-size: 0.82rem; }
+.settings-eval p { margin: 6px 0; font-size: 0.92rem; }
 .settings-diag { width: 100%; padding: 10px; font-family: monospace; font-size: 0.75rem; }
 .settings-save { position: sticky; bottom: 0; margin-top: 16px; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--bg) 28%); }
 .settings-save .notice { margin-bottom: 8px; }
@@ -280,7 +292,11 @@ tr:last-child td { border-bottom: 0; }
 th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
 
 /* ---------------------------------------------------------------- registo */
-.enrol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.enrol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; grid-template-rows: auto 1fr; }
+/* Câmara e lista de registados na coluna da esquerda; o formulário "Registar trabalhador" sozinho na da direita */
+.enrol-cam { grid-column: 1; grid-row: 1; }
+.enrol-registered { grid-column: 1; grid-row: 2; }
+.enrol-form { grid-column: 2; grid-row: 1 / span 2; }
 .enrol-cam { position: relative; overflow: hidden; border-radius: var(--radius-lg); background: #000; aspect-ratio: 4 / 3; box-shadow: var(--shadow); }
 .enrol-cam video { width: 100%; height: 100%; object-fit: cover; }
 .mirror { transform: scaleX(-1); }
@@ -299,7 +315,6 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 .camera-keepalive { position: fixed; right: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }
 .kiosk-dock { display: flex; align-items: center; justify-content: center; gap: 12px; flex-shrink: 0; }
 .choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 16px; text-align: center; }
-.choice-title { margin: 0; font-size: 2rem; }
 .choice-buttons { display: flex; gap: 18px; width: 100%; max-width: 720px; margin-top: 18px; }
 .choice-btn { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 170px; border: 0; border-radius: var(--radius-lg); color: #fff; font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25); }
 .choice-btn.in { background: var(--ok); }
@@ -310,18 +325,18 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 .header-chip.button { border: 0; color: var(--text); }
 .dock-back { flex: 1; max-width: 420px; }
 
-/* Logótipo TIMP como marca de água no fundo da app */
+/* Logótipo TIMP como marca de água no fundo da app (estático: a versão a ondular como uma bandeira foi retirada a pedido do utilizador) */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: url('/timp-logo.png') center 30% / min(55vmin, 460px) no-repeat;
-  opacity: 0.07;
+  background: url('/timp-logo.png') center 30% / min(65vmin, 560px) no-repeat;
+  opacity: 0.17;
   pointer-events: none;
 }
-:root[data-theme='dark'] body::before { opacity: 0.05; filter: brightness(1.4); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) body::before { opacity: 0.05; filter: brightness(1.4); } }
+:root[data-theme='dark'] body::before { opacity: 0.1; filter: brightness(1.4); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) body::before { opacity: 0.1; filter: brightness(1.4); } }
 .kiosk video { width: 100%; height: 100%; object-fit: cover; }
 .kiosk-top { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; gap: 8px; }
 .kiosk .dir { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 99px; font-size: 1.15rem; font-weight: 800; letter-spacing: 0.08em; color: #fff; box-shadow: var(--shadow); }
@@ -356,6 +371,11 @@ body::before {
 .banner.bad { --stripe: var(--danger-text); background: var(--danger-bg); color: var(--danger-text); }
 .banner.warn { --stripe: var(--amber); background: var(--warning-bg); color: var(--warning-text); }
 .banner.warn .banner-sub, .banner.bad .banner-sub { color: inherit; }
+/* Moldura de luz também no ecrã de Registar (ver lightframe.js), mais pequena: a caixa é menor do que o ecrã de leitura. */
+.enrol-cam { --light-frame: 14px; }
+.enrol-cam::after { content: ''; position: absolute; inset: 0; z-index: 1; border: solid #fff; border-width: var(--light-frame) var(--light-frame-x, var(--light-frame)); border-radius: inherit; pointer-events: none; transition: border-width 0.6s ease; }
+@media (orientation: portrait) { .enrol-cam::after { border-width: var(--light-frame); } }
+.enrol-cam .banner { z-index: 2; }
 .enrol-cam .banner { bottom: 10px; padding: 10px 14px 10px 20px; }
 .enrol-cam .banner-main { font-size: 1.1rem; }
 .enrol-cam .banner-sub { font-size: 0.9rem; }
@@ -363,6 +383,8 @@ body::before {
 
 @media (max-width: 800px) {
   .enrol, .settings-grid { grid-template-columns: 1fr; }
+  .enrol { grid-template-rows: none; }
+  .enrol-cam, .enrol-form, .enrol-registered { grid-column: auto; grid-row: auto; }
   .app-title { display: none; }
   /* ecrã estreito: os separadores ocupam a primeira linha; idioma e estado passam para a seguinte (antes saíam do ecrã) */
   .app-header { flex-wrap: wrap; }
@@ -374,6 +396,9 @@ body::before {
 .lang-switch { display: flex; gap: 2px; padding: 3px; border-radius: 99px; background: var(--card-bg); box-shadow: var(--shadow); }
 .lang-switch button { min-width: 36px; min-height: 34px; padding: 0 8px; border: 0; border-radius: 99px; background: none; color: var(--text-muted); font-size: 0.78rem; font-weight: 700; }
 .lang-switch button.on { background: var(--accent); color: var(--accent-contrast); }
+/* Seletor de orientação: botões maiores, para tocar num tablet */
+.orient-switch { align-self: flex-start; }
+.orient-switch button { min-height: 44px; min-width: 96px; padding: 0 16px; font-size: 0.95rem; }
 
 /* Campo de data dd/mm/yyyy */
 .date-field { position: relative; display: flex; align-items: center; gap: 6px; }
@@ -395,8 +420,9 @@ body::before {
 .roster-chips .chip.on small { color: rgba(255, 255, 255, 0.8); }
 
 /* Ecrã de repouso (fora do horário de funcionamento): preto e simples, para poupar ecrã e não incomodar. */
-.sleep-screen { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; border: 0; background: #000; color: #8a8f98; font-size: 1.05rem; text-align: center; }
-.sleep-screen .sleep-title { color: #b8bcc4; font-size: 1.4rem; font-weight: 700; }
+.sleep-screen { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; border: 0; background: #000; color: #6b7078; font-size: 1.05rem; text-align: center; }
+/* Data e hora no canto inferior esquerdo do repouso: sem fundo nem sombra, em cinzento escuro como a frase */
+.sleep-screen .scan-clock { position: absolute; left: 16px; bottom: 14px; color: #6b7078; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Telemóvel: cabeçalho compacto (separadores numa linha; idioma, estado e sessão em botões mais pequenos, lado a lado) */
 @media (max-width: 800px) {

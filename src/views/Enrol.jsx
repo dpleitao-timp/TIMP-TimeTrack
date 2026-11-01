@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, bestMatch, meanEmbedding } from '../lib/face.js'
-import { ENGINE } from '../lib/settings.js'
+import { engineTag, thresholdFor } from '../lib/settings.js'
 import { saveWorker, listWorkers, deleteWorker, setWorkerRole, hasUsableAdmin, isUsable, listRoster, rosterMeta } from '../lib/db.js'
 import { useCamera } from '../lib/useCamera.js'
+import { createLightControl, setFrameVars } from '../lib/lightframe.js'
+import { faceLuma, saturation } from '../lib/diag.js'
 import { useT } from '../lib/i18n.jsx'
 
 // Passos de captura guiada. Cada passo exige uma pose; só o vetor (embedding) é guardado.
@@ -25,6 +27,8 @@ const PPE_STEPS = [
 export default function Enrol({ settings, onRegistered }) {
   const { t } = useT()
   const videoRef = useRef(null)
+  const camBoxRef = useRef(null)
+  const lightRef = useRef(null) // moldura de luz, a mesma do ecrã de leitura
   const { ready, error } = useCamera(videoRef, { deviceId: settings.cameraId })
   const [name, setName] = useState('')
   const [sageId, setSageId] = useState('')
@@ -39,8 +43,17 @@ export default function Enrol({ settings, onRegistered }) {
   const [workers, setWorkers] = useState([])
   const [roster, setRoster] = useState([]) // lista de trabalhadores da obra (vem do relay)
   const [rosterAt, setRosterAt] = useState(0) // quando foi sincronizada (0 = nunca)
-  const [pick, setPick] = useState('')
   const runRef = useRef({ active: false })
+
+  // Moldura branca à volta da câmara, como no ecrã de leitura, para os vetores serem tirados com a luz que o ecrã dá
+  // depois na leitura (sem isto, em pouca luz o registo e a leitura têm luzes diferentes). Mais pequena, porque a caixa é menor.
+  useEffect(() => {
+    const auto = settings.lightFrameAuto !== false
+    lightRef.current = createLightControl((v) => setFrameVars(camBoxRef.current, v, auto, 1, true), auto)
+    return () => {
+      lightRef.current = null
+    }
+  }, [settings.lightFrameAuto])
 
   const refresh = async () => {
     setWorkers(await listWorkers())
@@ -48,16 +61,9 @@ export default function Enrol({ settings, onRegistered }) {
     setRosterAt((await rosterMeta()).at)
   }
   const pickWorker = (w) => {
-    setPick(`${w.name} (${w.sageId})`)
     setSageId(w.sageId)
     setName(w.name)
     setMsg('')
-  }
-  const onPick = (value) => {
-    setPick(value)
-    const q = value.trim().toLowerCase()
-    const hit = roster.find((w) => `${w.name} (${w.sageId})`.toLowerCase() === q || w.sageId.toLowerCase() === q)
-    if (hit) pickWorker(hit)
   }
   const enrolledIds = new Set(workers.map((w) => w.id))
   // Registado neste tablet mas já fora da lista da obra (saiu da obra, ou ainda não entrou). Só é um aviso:
@@ -117,6 +123,7 @@ export default function Enrol({ settings, onRegistered }) {
     let frames = []
     while (run.active && i < steps.length) {
       const { face } = await detect(videoRef.current)
+      if (face) lightRef.current?.update(faceLuma(videoRef.current, face.box), { sat: saturation(videoRef.current) ?? 0 }) // a luz da cara decide a moldura
       const r = face?.rotation?.angle
       setLive(
         !face ? t('enrol.noFace') : !r ? t('enrol.noPose') : `yaw ${r.yaw.toFixed(2)} · pitch ${r.pitch.toFixed(2)} · score ${face.score.toFixed(2)} · ${frames.length}/${FRAMES}`,
@@ -126,7 +133,7 @@ export default function Enrol({ settings, onRegistered }) {
       if (frames.length >= FRAMES) {
         const avg = meanEmbedding(frames)
         const { worker, similarity } = bestMatch(avg, existing.filter((w) => w.id !== id))
-        if (worker && similarity > settings.threshold) {
+        if (worker && similarity > thresholdFor(settings)) {
           setMsg(t('enrol.faceExists', { name: worker.name }))
           return
         }
@@ -142,24 +149,23 @@ export default function Enrol({ settings, onRegistered }) {
       if (adding) {
         // acrescenta as novas capturas às existentes (mantém SAGE ID, perfil e data de criação)
         const all = [...adding.embeddings, ...embeddings]
-        await saveWorker({ id, name: name.trim(), role: adding.role, embeddings: all, createdAt: adding.createdAt, engine: ENGINE })
+        await saveWorker({ id, name: name.trim(), role: adding.role, embeddings: all, createdAt: adding.createdAt, engine: engineTag() })
         setMsg(t('enrol.donePpe', { name: name.trim(), n: all.length }))
         onRegistered?.(null)
       } else if (replacing) {
         // atualizar a biometria: troca os vetores e mantém SAGE ID, perfil e data de criação
-        await saveWorker({ id, name: name.trim(), role: replacing.role, embeddings, createdAt: replacing.createdAt, engine: ENGINE })
+        await saveWorker({ id, name: name.trim(), role: replacing.role, embeddings, createdAt: replacing.createdAt, engine: engineTag() })
         setMsg(t('enrol.doneUpdated', { name: name.trim(), n: embeddings.length }))
         onRegistered?.(null)
       } else {
         // o primeiro registo é sempre Administrador; depois, um Administrador pode registar outros
         const role = !hasUsableAdmin(existing) || makeAdmin ? 'admin' : 'user'
-        await saveWorker({ id, name: name.trim(), role, embeddings, engine: ENGINE })
+        await saveWorker({ id, name: name.trim(), role, embeddings, engine: engineTag() })
         setMsg(t(role === 'admin' ? 'enrol.doneAdmin' : 'enrol.done', { name: name.trim(), n: embeddings.length }))
         onRegistered?.({ id, name: name.trim(), role })
       }
       setReplacing(null)
       setAdding(null)
-      setPick('')
       setName('')
       setSageId('')
       setMakeAdmin(false)
@@ -167,9 +173,55 @@ export default function Enrol({ settings, onRegistered }) {
     }
   }
 
+
+  // ações da lista de trabalhadores
+  const startReplace = (w) => {
+    setReplacing(w)
+    setAdding(null)
+    setSageId(w.id)
+    setName(w.name)
+    setMakeAdmin(w.role === 'admin')
+    setMsg('')
+    window.scrollTo?.({ top: 0 })
+  }
+  const startAdd = (w) => {
+    setAdding(w)
+    setReplacing(null)
+    setSageId(w.id)
+    setName(w.name)
+    setMakeAdmin(w.role === 'admin')
+    setMsg('')
+    window.scrollTo?.({ top: 0 })
+  }
+  const toggleRole = async (w) => {
+    try {
+      await setWorkerRole(w.id, w.role === 'admin' ? 'user' : 'admin')
+    } catch (e) {
+      return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
+    }
+    await refresh()
+    onRegistered?.(null)
+  }
+  // strong: único trabalhador e único Administrador, com confirmação reforçada (escrever o SAGE ID)
+  const removeWorker = async (w, strong) => {
+    if (strong) {
+      const typed = prompt(t('enrol.confirmDeleteAdmin', { name: w.name, id: w.id }))
+      if (typed === null || typed.trim() !== w.id) return
+    } else if (!confirm(t('enrol.confirmDelete', { name: w.name }))) {
+      return
+    }
+    try {
+      await deleteWorker(w.id)
+    } catch (e) {
+      return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
+    }
+    await refresh()
+    onRegistered?.(null)
+  }
+
   return (
     <div className="page enrol">
-      <div className="enrol-cam">
+      <div className="enrol-cam" ref={camBoxRef}>
         <video ref={videoRef} muted playsInline className="mirror" />
         {capturing && (
           <div className="banner warn">
@@ -183,45 +235,24 @@ export default function Enrol({ settings, onRegistered }) {
       <div className="enrol-form">
         <div className="card">
           <h2>{adding ? t('enrol.addPpeTitle', { name: adding.name }) : replacing ? t('enrol.updateTitle', { name: replacing.name }) : t('enrol.title')}</h2>
-          {roster.length > 0 && !replacing && !adding && (
-            <>
-              <label className="field">
-                {t('enrol.roster')}
-                <input
-                  className="field-input"
-                  list="roster-list"
-                  placeholder={t('enrol.rosterSearch')}
-                  value={pick}
-                  onChange={(e) => onPick(e.target.value)}
-                  disabled={capturing}
-                  autoComplete="off"
-                />
-                <datalist id="roster-list">
-                  {roster.map((w) => (
-                    <option key={w.sageId} value={`${w.name} (${w.sageId})`} />
-                  ))}
-                </datalist>
-              </label>
-              {toEnrol.length > 0 && (
-                <div className="roster-chips">
-                  <span className="muted">{t('enrol.toEnrol', { n: toEnrol.length })}</span>
-                  <div>
-                    {toEnrol.map((w) => (
-                      <button
-                        key={w.sageId}
-                        type="button"
-                        className={`chip ${w.sageId === sageId.trim() ? 'on' : ''}`}
-                        disabled={capturing}
-                        onClick={() => pickWorker(w)}
-                      >
-                        {w.name}
-                        <small>{w.sageId}</small>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
+          {roster.length > 0 && !replacing && !adding && toEnrol.length > 0 && (
+            <div className="roster-chips">
+              <span className="muted">{t('enrol.toEnrol', { n: toEnrol.length })}</span>
+              <div>
+                {toEnrol.map((w) => (
+                  <button
+                    key={w.sageId}
+                    type="button"
+                    className={`chip ${w.sageId === sageId.trim() ? 'on' : ''}`}
+                    disabled={capturing}
+                    onClick={() => pickWorker(w)}
+                  >
+                    {w.name}
+                    <small>{w.sageId}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           <label className="field">
             {t('enrol.sage')}
@@ -269,113 +300,106 @@ export default function Enrol({ settings, onRegistered }) {
           )}
         </div>
 
-        <h3>{t('enrol.registered', { n: workers.length })}</h3>
-        {outCount > 0 && <p className="notice notice-warn">{t('enrol.outOfRosterSummary', { n: outCount })}</p>}
-        <div className="card">
-          <ul className="workers">
-            {!workers.length && <li className="muted">{t('enrol.none')}</li>}
-            {workers.map((w) => (
-              <li key={w.id}>
-                <span>
-                  {w.name} {w.role === 'admin' && <span className="pill pill-ok">{t('enrol.adminBadge')}</span>}{' '}
-                  {outOfRoster(w) && <span className="pill pill-warn">{t('enrol.outOfRoster')}</span>}
-                  <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : w.stale ? t('enrol.otherEngine', { engine: w.engine }) : t('enrol.vectors', { n: w.embeddings.length })}</small>
-                </span>
-                <span className="btn-row">
-                  <button
-                    className="link-button"
-                    disabled={capturing}
-                    onClick={() => {
-                      setReplacing(w)
-                      setAdding(null)
-                      setSageId(w.id)
-                      setName(w.name)
-                      setMakeAdmin(w.role === 'admin')
-                      setMsg('')
-                      window.scrollTo?.({ top: 0 })
-                    }}
-                  >
-                    {t('enrol.updateBiometrics')}
-                  </button>
-                  {isUsable(w) && (
-                    <button
-                      className="link-button"
-                      disabled={capturing}
-                      onClick={() => {
-                        setAdding(w)
-                        setReplacing(null)
-                        setSageId(w.id)
-                        setName(w.name)
-                        setMakeAdmin(w.role === 'admin')
-                        setMsg('')
-                        window.scrollTo?.({ top: 0 })
-                      }}
-                    >
-                      {t('enrol.addPpe')}
-                    </button>
-                  )}
-                  {w.role === 'admin' && isUsable(w) && usableAdmins === 1 && workers.length > 1 ? (
-                    <span className="muted">{t('enrol.onlyAdmin')}</span>
-                  ) : w.role === 'admin' && isUsable(w) && usableAdmins === 1 ? (
-                    // único trabalhador e único Administrador: pode apagar-se, com confirmação reforçada (escrever o SAGE ID)
-                    <button
-                      className="link-button"
-                      onClick={async () => {
-                        const typed = prompt(t('enrol.confirmDeleteAdmin', { name: w.name, id: w.id }))
-                        if (typed === null || typed.trim() !== w.id) return
-                        try {
-                          await deleteWorker(w.id)
-                        } catch (e) {
-                          return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
-                        }
-                        await refresh()
-                        onRegistered?.(null)
-                      }}
-                    >
-                      {t('enrol.delete')}
-                    </button>
-                  ) : (
-                    <>
-                      {!w.broken && (
-                        <button
-                          className="link-button"
-                          onClick={async () => {
-                            try {
-                              await setWorkerRole(w.id, w.role === 'admin' ? 'user' : 'admin')
-                            } catch (e) {
-                              return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
-                            }
-                            await refresh()
-                            onRegistered?.(null)
-                          }}
-                        >
-                          {w.role === 'admin' ? t('enrol.removeAdmin') : t('enrol.makeAdmin')}
-                        </button>
-                      )}
-                      <button
-                        className="link-button"
-                        onClick={async () => {
-                          if (confirm(t('enrol.confirmDelete', { name: w.name }))) {
-                            try {
-                              await deleteWorker(w.id)
-                            } catch (e) {
-                              return setMsg(e.code === 'LAST_ADMIN' ? t('err.lastAdmin') : String(e.message || e))
-                            }
-                            await refresh()
-                            onRegistered?.(null)
-                          }
-                        }}
-                      >
-                        {t('enrol.delete')}
-                      </button>
-                    </>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      </div>
+      <div className="enrol-registered">
+          <h3>{t('enrol.registered', { n: workers.length })}</h3>
+          {outCount > 0 && <p className="notice notice-warn">{t('enrol.outOfRosterSummary', { n: outCount })}</p>}
+          <div className="card">
+            <ul className="workers">
+              {!workers.length && <li className="muted">{t('enrol.none')}</li>}
+              {workers.map((w) => (
+                <li key={w.id}>
+                  <span>
+                    {w.name} {w.role === 'admin' && <span className="pill pill-ok">{t('enrol.adminBadge')}</span>}{' '}
+                    {outOfRoster(w) && <span className="pill pill-warn">{t('enrol.outOfRoster')}</span>}
+                    <small>{t('enrol.sage')} {w.id} · {w.broken ? t('enrol.unreadable') : w.stale ? <span className="stale-flag" role="img" title={t('enrol.updateBiometrics')} aria-label={t('enrol.updateBiometrics')}><IconAlert /></span> : t('enrol.vectors', { n: w.embeddings.length })}</small>
+                  </span>
+                  <span className="row-actions">
+                    <IconButton label={t('enrol.updateBiometrics')} disabled={capturing} onClick={() => startReplace(w)}>
+                      <IconFace />
+                    </IconButton>
+                    {isUsable(w) && (
+                      <IconButton label={t('enrol.addPpe')} disabled={capturing} onClick={() => startAdd(w)}>
+                        <IconCameraPlus />
+                      </IconButton>
+                    )}
+                    {w.role === 'admin' && isUsable(w) && usableAdmins === 1 ? (
+                      // único Administrador ativo: não pode perder o perfil; só se apaga se for também o único trabalhador
+                      <>
+                        <IconButton label={t('enrol.adminBadge')} disabled on>
+                          <IconShield checked />
+                        </IconButton>
+                        <IconButton label={t('enrol.delete')} danger disabled={workers.length > 1} onClick={() => removeWorker(w, true)}>
+                          <IconTrash />
+                        </IconButton>
+                      </>
+                    ) : (
+                      <>
+                        {!w.broken && (
+                          <IconButton label={w.role === 'admin' ? t('enrol.removeAdmin') : t('enrol.makeAdmin')} on={w.role === 'admin'} onClick={() => toggleRole(w)}>
+                            <IconShield checked={w.role === 'admin'} />
+                          </IconButton>
+                        )}
+                        <IconButton label={t('enrol.delete')} danger onClick={() => removeWorker(w, false)}>
+                          <IconTrash />
+                        </IconButton>
+                      </>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
       </div>
     </div>
   )
 }
+
+// Botão quadrado só com ícone (a etiqueta fica no tooltip e para leitores de ecrã).
+function IconButton({ label, children, danger, on, ...rest }) {
+  return (
+    <button type="button" className={`icon-btn${danger ? ' danger' : ''}${on ? ' on' : ''}`} title={label} aria-label={label} {...rest}>
+      {children}
+    </button>
+  )
+}
+
+const svgProps = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }
+
+// Rosto dentro de uma moldura de leitura: atualizar a biometria
+const IconFace = () => (
+  <svg {...svgProps}>
+    <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />
+    <circle cx="9.2" cy="10.2" r="0.6" fill="currentColor" />
+    <circle cx="14.8" cy="10.2" r="0.6" fill="currentColor" />
+    <path d="M9 14.5c.8.9 1.8 1.3 3 1.3s2.2-.4 3-1.3" />
+  </svg>
+)
+// Câmara com um mais: adicionar capturas
+const IconCameraPlus = () => (
+  <svg {...svgProps}>
+    <path d="M4 8h3l1.5-2h5L15 8h5v11H4z" />
+    <path d="M12 11.2v4.6M9.7 13.5h4.6" />
+  </svg>
+)
+// Escudo (com visto quando já é Administrador): perfil de Administrador
+const IconShield = ({ checked }) => (
+  <svg {...svgProps}>
+    <path d="M12 3l7 3v5.5c0 4.2-2.8 7.6-7 9.5-4.2-1.9-7-5.3-7-9.5V6z" />
+    {checked ? <path d="M8.7 12.2l2.4 2.4 4.2-4.6" /> : <path d="M12 9v5M9.5 11.5h5" />}
+  </svg>
+)
+// Círculo com ponto de exclamação: a biometria é de um motor antigo e tem de ser atualizada
+const IconAlert = () => (
+  <svg {...svgProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7.5v5.5" />
+    <circle cx="12" cy="16.4" r="0.7" fill="currentColor" />
+  </svg>
+)
+// Caixote do lixo: apagar
+const IconTrash = () => (
+  <svg {...svgProps}>
+    <path d="M4 7h16M9 7V4.5h6V7M6.5 7l.8 12.5h9.4L17.5 7M10 11v5M14 11v5" />
+  </svg>
+)

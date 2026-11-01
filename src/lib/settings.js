@@ -1,9 +1,10 @@
 // Definições por dispositivo (localStorage). A direção (Entrada/Saída) escolhe-se no ecrã Picar.
 const KEY = 'timp-ponto-settings'
 
-// Motor de reconhecimento (único). Cada registo guarda o motor com que foi feito; os de outro motor
-// (p. ex. o MobileFaceNet, já retirado) ficam obsoletos até se atualizar a biometria.
-export const ENGINE = 'faceres'
+// Motor de reconhecimento: 'faceres' (o do Human) ou 'sface' (rede da família ArcFace, ver sface.js). Cada registo guarda
+// o motor com que foi feito; os de outro motor ficam obsoletos até se atualizar a biometria (os vetores de um motor não
+// servem noutro). Mudar de motor recarrega a app.
+export const ENGINES = ['faceres', 'sface']
 
 const DEFAULTS = {
   detectorConfidence: 0.4, // confiança mínima da deteção do rosto (mais baixa = deteta melhor com capacete/óculos)
@@ -14,7 +15,9 @@ const DEFAULTS = {
   deviceId: '',
   deviceToken: '',
   relayUrl: '', // relay Cloudflare onde o tablet escreve (o Supabase vai lá buscar)
-  threshold: 0.55, // similaridade mínima (0..1)
+  engine: 'faceres', // motor de reconhecimento
+  threshold: 0.55, // similaridade mínima do FaceRes (0..1)
+  thresholdSface: 0.45, // semelhança mínima do SFace (cosseno, -1..1): escala diferente da do FaceRes, não se aproveitam os valores
   liveness: true, // exige piscar / virar a cabeça
   cooldownSec: 60, // ignora nova picagem do mesmo trabalhador
   stableFrames: 2, // avaliações seguidas com a mesma identidade
@@ -23,15 +26,8 @@ const DEFAULTS = {
   fastLiveness: false, // modo rápido: dispensa o piscar quando o modelo anti-foto tem confiança alta
   debug: false, // mostra os valores do reconhecimento no ecrã de picar
   cameraId: '', // câmara normal ('' = frontal)
-  camExposure: 'auto', // exposição da câmara: 'auto' | 'manual' (experimental, se a câmara o permitir)
-  camExposureMs: 30, // tempo de exposição em modo manual (ms)
-  camFps: 0, // taxa de imagens da câmara (0 = automática)
+  orientation: 'auto', // orientação do ecrã: 'auto' (segue o aparelho) | 'landscape' | 'portrait'
   lightFrameAuto: true, // moldura branca do ecrã de leitura ajusta-se à luz da cara
-  scheduleOn: false, // horário de funcionamento: fora dele a câmara desliga-se e o ecrã fica preto
-  scheduleFrom: '05:00',
-  scheduleTo: '22:00',
-  scheduleOffSat: false, // desligar ao sábado (o dia inteiro em repouso)
-  scheduleOffSun: false, // desligar ao domingo
 }
 
 export function loadSettings() {
@@ -42,15 +38,21 @@ export function loadSettings() {
     /* ignora */
   }
   const merged = { ...DEFAULTS, ...s }
-  // o tablet já não tem ligação direta ao Supabase: apaga o que ficou guardado de versões anteriores
-  if ('engine' in s) {
-    // definição retirada: o motor é sempre o FaceRes
-    delete merged.engine
+  // motor desconhecido (por exemplo o MobileFaceNet, já retirado): volta ao FaceRes
+  if (!ENGINES.includes(merged.engine)) {
+    merged.engine = 'faceres'
     saveSettings(merged)
   }
+  // o tablet já não tem ligação direta ao Supabase: apaga o que ficou guardado de versões anteriores
   if ('supabaseUrl' in s || 'supabaseAnonKey' in s) {
     delete merged.supabaseUrl
     delete merged.supabaseAnonKey
+    saveSettings(merged)
+  }
+  // o repouso passou a ser a norma (sem horário nem fim de semana): apaga as definições antigas
+  const oldSchedule = ['scheduleOn', 'scheduleFrom', 'scheduleTo', 'scheduleOffSat', 'scheduleOffSun'].filter((k) => k in s)
+  if (oldSchedule.length) {
+    oldSchedule.forEach((k) => delete merged[k])
     saveSettings(merged)
   }
   if (!merged.deviceId) {
@@ -59,6 +61,13 @@ export function loadSettings() {
   }
   return merged
 }
+
+// Motor em uso e limiar de semelhança desse motor.
+export const currentEngine = () => (loadSettings().engine === 'sface' ? 'sface' : 'faceres')
+// Etiqueta guardada em cada registo. O modelo do SFace faz parte dela: os vetores do int8 e do fp32 são parecidos mas não
+// iguais (semelhança ~0,85 entre eles), por isso um registo feito com o int8 fica obsoleto quando passa a valer o fp32.
+export const engineTag = () => (currentEngine() === 'sface' ? 'sface-fp32' : 'faceres')
+export const thresholdFor =(s) => Number(s.engine === 'sface' ? s.thresholdSface : s.threshold)
 
 export function saveSettings(s) {
   try {

@@ -35,6 +35,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,json,bin}'],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: '/index.html',
+        // O motor SFace (WebAssembly de ~15 MB e modelo de ~10 MB) só se descarrega quando se usa esse motor; a seguir fica em
+        // cache. Assim a instalação normal não carrega com ~25 MB que o FaceRes não usa.
+        runtimeCaching: [{ urlPattern: /\.(wasm|onnx(\.p\d+)?)$/, handler: 'CacheFirst', options: { cacheName: 'sface-engine', expiration: { maxEntries: 4 } } }],
       },
       manifest: {
         name: 'TIMP Relógio de Ponto',

@@ -1,5 +1,5 @@
-import { backendName } from './face.js'
-import { loadSettings } from './settings.js'
+import { backendName, engineName } from './face.js'
+import { loadSettings, thresholdFor } from './settings.js'
 
 // Registo de diagnóstico do reconhecimento: os últimos fotogramas, um por linha, para se ver a sequência real
 // (o rosto some? o estado alterna? quanto demora cada deteção?). Só em memória e só com "debug" ligado; nada sai do tablet.
@@ -18,12 +18,12 @@ export function diagStart() {
 }
 
 // why: 'ok' | 'noface' | 'noembedding' (rosto sem vetor, também conta como "sem rosto" para o reconhecedor)
-export function diagPush({ detMs, why, face, r, trace, video, light }) {
+export function diagPush({ detMs, why, face, r, trace, video, light, noise, sat }) {
   if (!t0) t0 = performance.now()
   rows.push(
     [
       `+${String(Math.round(performance.now() - t0)).padStart(6)}ms`,
-      `det ${String(detMs).padStart(4)}ms`,
+      `det ${String(detMs).padStart(4)}ms${face?.sfaceMs != null ? ` (SFace ${face.sfaceMs}ms)` : ''}`,
       `rosto ${why}`,
       `caixa ${f(face?.boxScore)} malha ${f(face?.faceScore)}`,
       `estado ${r.status}`,
@@ -35,11 +35,13 @@ export function diagPush({ detMs, why, face, r, trace, video, light }) {
       `vídeo ${video?.w}x${video?.h} estado ${video?.rs} luz ${video?.lum}`,
       `câmara fps ${video?.fps ?? '-'} exposição ${video?.exp ?? '-'} iso ${video?.iso ?? '-'} modo ${video?.mode ?? '-'}`,
       `cara luz ${f(light?.luma, 0)} moldura ${f(light?.frame, 1)}vmin`,
+      `ruído ${f(noise, 2)} saturação ${f(sat == null ? null : sat * 100, 1)}%`,
     ].join(' | '),
   )
   recs.push({
     t: Math.round(performance.now() - t0),
     det: detMs,
+    sface: face?.sfaceMs,
     status: r.status,
     sim: r.similarity,
     real: r.real,
@@ -48,6 +50,8 @@ export function diagPush({ detMs, why, face, r, trace, video, light }) {
     luma: light?.luma,
     frame: light?.frame,
     auto: light?.auto,
+    noise,
+    sat,
   })
   if (rows.length > MAX) {
     rows.shift()
@@ -112,6 +116,71 @@ export function faceLuma(v, box) {
   }
 }
 
+// Ruído da imagem: quanto cada pixel difere da média dos 4 vizinhos, numa janela de 64x64 pixels da cara (zona do nariz e
+// bochechas, sem escalar), em percentagem da luminosidade média dessa janela. É relativo à luz de propósito: em valor
+// absoluto o ruído sobe só porque a imagem ficou mais clara. Em pele lisa quase só sobra o ruído do sensor. Mais alto =
+// mais ruído por unidade de luz.
+let noiseProbe
+export function faceNoise(v, box) {
+  const vw = v?.videoWidth || v?.width
+  const vh = v?.videoHeight || v?.height
+  if (!v || !box || box.length < 4 || !vw || !vh) return null
+  try {
+    const [x, y, w, h] = box
+    if (!(w > 80 && h > 80)) return null
+    const N = 64
+    const sx = Math.max(0, Math.min(vw - N, Math.round(x + w / 2 - N / 2)))
+    const sy = Math.max(0, Math.min(vh - N, Math.round(y + h * 0.55 - N / 2)))
+    noiseProbe ??= document.createElement('canvas')
+    noiseProbe.width = noiseProbe.height = N
+    const c = noiseProbe.getContext('2d', { willReadFrequently: true })
+    c.drawImage(v, sx, sy, N, N, 0, 0, N, N)
+    const d = c.getImageData(0, 0, N, N).data
+    const L = new Float32Array(N * N)
+    for (let i = 0; i < N * N; i++) L[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]
+    let sum = 0
+    let lum = 0
+    let count = 0
+    for (let yy = 1; yy < N - 1; yy++) {
+      for (let xx = 1; xx < N - 1; xx++) {
+        const i = yy * N + xx
+        sum += Math.abs(L[i] - (L[i - 1] + L[i + 1] + L[i - N] + L[i + N]) / 4)
+        lum += L[i]
+        count++
+      }
+    }
+    const mean = lum / count
+    return mean > 1 ? (sum / count / mean) * 100 : null
+  } catch {
+    return null
+  }
+}
+
+// Saturação: fração (0 a 1) da imagem inteira com pixels quase brancos (algum canal >= 250). Quando a imagem estoura
+// perde-se informação; a moldura de luz usa isto para não crescer mais. A causa não está apurada (ver a nota do
+// utilizador no ficheiro de decisões): é uma medida, não uma explicação.
+let satProbe
+export function saturation(v) {
+  const vw = v?.videoWidth || v?.width
+  const vh = v?.videoHeight || v?.height
+  if (!v || !vw || !vh) return null
+  try {
+    const W = 64
+    const H = 36
+    satProbe ??= document.createElement('canvas')
+    satProbe.width = W
+    satProbe.height = H
+    const c = satProbe.getContext('2d', { willReadFrequently: true })
+    c.drawImage(v, 0, 0, W, H)
+    const d = c.getImageData(0, 0, W, H).data
+    let n = 0
+    for (let i = 0; i < d.length; i += 4) if (d[i] >= 250 || d[i + 1] >= 250 || d[i + 2] >= 250) n++
+    return n / (W * H)
+  } catch {
+    return null
+  }
+}
+
 export const diagCount = () => rows.length
 
 const nums = (a) => a.filter((v) => typeof v === 'number' && Number.isFinite(v))
@@ -133,16 +202,18 @@ function summary() {
   return [
     'RESUMO',
     `moldura auto ${last.auto ? 'LIGADA' : 'DESLIGADA'} (${f(last.frame, 1)}vmin)`,
-    `limiar ${s.threshold} backend ${backendName()}`,
+    `limiar ${thresholdFor(s)} motor ${engineName()} backend ${backendName()}`,
     `${recs.length} fotogramas em ${last.t}ms`,
     `1º match ${first((x) => x.status === 'match') ?? '-'}ms`,
     `1º piscar ${first((x) => x.blink) ?? '-'}ms`,
     `sim média ${f(avg(sim))} mín ${f(minOf(sim))} máx ${f(maxOf(sim))}`,
     `unknown ${recs.filter((x) => x.status === 'unknown').length} spoof ${recs.filter((x) => x.status === 'spoof').length}`,
     `luz cara média ${f(avg(luma), 0)}`,
+    `ruído médio ${f(avg(nums(recs.map((x) => x.noise))), 2)}`,
+    `saturação média ${f(avg(nums(recs.map((x) => x.sat))) == null ? null : avg(nums(recs.map((x) => x.sat))) * 100, 1)}% máx ${f(maxOf(nums(recs.map((x) => x.sat))) == null ? null : maxOf(nums(recs.map((x) => x.sat))) * 100, 1)}%`,
     `real média ${f(avg(real))} mín ${f(minOf(real))}`,
     `live média ${f(avg(live))} mín ${f(minOf(live))}`,
-    `det média ${f(avg(det), 0)}ms`,
+    `det média ${f(avg(det), 0)}ms${engineName() === 'sface' ? ` (SFace ${f(avg(nums(recs.map((x) => x.sface))), 0)}ms)` : ''}`,
   ].join(' | ')
 }
 
@@ -166,7 +237,16 @@ function capabilitiesLine() {
   }
 }
 
+// Que aparelho e navegador produziram este registo (evita confundir testes de aparelhos diferentes).
+function deviceLine() {
+  try {
+    return `APARELHO ${navigator.platform || '-'} · ecrã ${innerWidth}x${innerHeight}@${devicePixelRatio} · núcleos ${navigator.hardwareConcurrency ?? '-'} · ${navigator.userAgent}`
+  } catch {
+    return 'APARELHO desconhecido'
+  }
+}
+
 export function diagText() {
   const head = `TIMP Time Clock · diagnóstico · ${new Date().toISOString()} · ${rows.length} fotogramas · backend ${backendName()}`
-  return [head, summary(), capabilitiesLine(), ...rows].join('\n')
+  return [head, deviceLine(), summary(), capabilitiesLine(), ...rows].join('\n')
 }

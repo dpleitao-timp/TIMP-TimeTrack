@@ -1,4 +1,5 @@
 import { rankMatches, meanEmbedding, livenessSignals } from './face.js'
+import { thresholdFor } from './settings.js'
 
 // Reconhecimento por janela deslizante de N fotogramas:
 //  - a decisão usa a MÉDIA dos vetores dos últimos N fotogramas (menos ruído do que um só);
@@ -111,6 +112,7 @@ export function createRecognizer(getSettings, workers) {
       return { status: 'spoof', ...info }
     }
 
+    const thr = thresholdFor(s) // limiar do motor em uso
     const ranked = rankMatches(meanEmbedding(buffer.map((b) => b.e)), workers)
     const best = ranked[0]
     const second = ranked[1]
@@ -118,10 +120,10 @@ export function createRecognizer(getSettings, workers) {
     info.second = second?.similarity ?? 0
     info.hasSecond = !!second // false quando só há um trabalhador utilizável (o 2º = 0 não quer dizer "nada parecido")
     if (early) {
-      const strong = best && best.similarity >= s.threshold + STRONG_SIM && (!second || best.similarity - second.similarity >= STRONG_MARGIN)
+      const strong = best && best.similarity >= thr + STRONG_SIM && (!second || best.similarity - second.similarity >= STRONG_MARGIN)
       if (!strong) return { status: 'collecting', ...info } // espera pelos restantes fotogramas
     }
-    if (!best || best.similarity < s.threshold || (second && best.similarity - second.similarity < MARGIN)) {
+    if (!best || best.similarity < thr || (second && best.similarity - second.similarity < MARGIN)) {
       track = null
       return { status: 'unknown', ...info }
     }

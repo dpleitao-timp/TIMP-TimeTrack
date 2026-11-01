@@ -1,8 +1,8 @@
 import Human from '@vladmandic/human'
-import { loadSettings, ENGINE } from './settings.js'
+import { loadSettings, currentEngine } from './settings.js'
+import { embedSface, loadSface, cosine } from './sface.js'
 
-// O backend vem das Definições e só muda depois de recarregar a app (o Human é criado uma vez).
-export const currentEngine = () => ENGINE
+// O backend e o motor vêm das Definições e só mudam depois de recarregar a app (o Human é criado uma vez).
 
 // Modelos servidos localmente (public/models) e guardados em cache pelo service worker.
 const baseConfig = {
@@ -37,18 +37,24 @@ function buildConfig() {
   const cfg = structuredClone(baseConfig)
   cfg.backend = s.backend === 'webgpu' ? 'webgpu' : 'webgl'
   cfg.face.detector.minConfidence = Number(s.detectorConfidence) || 0.4
+  if (s.engine === 'sface') cfg.face.description.enabled = false // o vetor vem do SFace: poupa o FaceRes em cada fotograma
   return cfg
 }
 
 let human
 let loadPromise
+let activeEngine = 'faceres' // motor com que a app arrancou
 // A promessa é partilhada: várias chamadas esperam pelo mesmo carregamento.
 export function initHuman(onStatus) {
   loadPromise ??= (async () => {
     const t0 = performance.now()
+    activeEngine = currentEngine()
     const h = new Human(buildConfig())
     await h.load()
     await h.warmup()
+    // Um a seguir ao outro, não em paralelo: arrancar o TensorFlow (WebGL) e o onnxruntime (WebAssembly) ao mesmo tempo
+    // deixava o arranque preso.
+    if (activeEngine === 'sface') await loadSface()
     human = h
     console.info(`Modelos de reconhecimento (${h.tf.getBackend()}) prontos em ${Math.round(performance.now() - t0)} ms`)
     return h
@@ -61,6 +67,7 @@ export function initHuman(onStatus) {
 
 export const getHuman = () => human
 export const backendName = () => human?.tf?.getBackend?.() ?? '-'
+export const engineName = () => activeEngine
 
 // Devolve { face, gestures, why, raw } do frame atual (face null se não há rosto utilizável).
 // why: 'ok' | 'noface' | 'noembedding'; raw é o que o detetor viu (para o diagnóstico).
@@ -68,12 +75,23 @@ export async function detect(video) {
   const res = await human.detect(video)
   const raw = res.face?.[0]
   if (!raw) return { face: null, gestures: [], why: 'noface', raw: null }
+  if (activeEngine === 'sface') {
+    // o vetor sai do SFace: recorta e alinha o rosto com os 5 pontos da malha e corre a rede
+    const ts = performance.now()
+    try {
+      raw.embedding = await embedSface(video, raw.mesh)
+      raw.sfaceMs = Math.round(performance.now() - ts) // para o diagnóstico separar a deteção do SFace
+    } catch (e) {
+      console.error('SFace', e)
+      raw.embedding = null
+    }
+  }
   if (!raw.embedding?.length) return { face: null, gestures: [], why: 'noembedding', raw }
   return { face: raw, gestures: (res.gesture || []).map((g) => g.gesture), why: 'ok', raw }
 }
 
-// Semelhança 0..1 entre dois vetores (distância normalizada do Human para o descritor do FaceRes).
-export const similarity = (a, b) => human.match.similarity(a, b)
+// Semelhança entre dois vetores. FaceRes: 0..1 (distância normalizada do Human). SFace: cosseno (-1..1).
+export const similarity = (a, b) => (activeEngine === 'sface' ? cosine(a, b) : human.match.similarity(a, b))
 
 // Trabalhadores registados com outro motor (ou ilegíveis) não participam no reconhecimento.
 const usable = (w) => !w.stale && !w.broken && w.embeddings.length

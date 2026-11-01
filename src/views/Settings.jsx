@@ -7,8 +7,11 @@ import { listRoster, rosterMeta } from '../lib/db.js'
 import { syncRoster } from '../lib/sync.js'
 import { fmtDateTime } from '../lib/date.js'
 import { diagCount, diagText } from '../lib/diag.js'
-import { acquireCamera } from '../lib/useCamera.js'
-import { readCapabilities } from '../lib/cameraControls.js'
+import { applyOrientation, canLock, currentOrientation } from '../lib/orientation.js'
+import { initHuman, similarity } from '../lib/face.js'
+import { listWorkers } from '../lib/db.js'
+import { thresholdFor } from '../lib/settings.js'
+import { evaluate } from '../lib/evaluate.js'
 
 export default function Settings({ settings, onChange }) {
   const { t } = useT()
@@ -23,16 +26,26 @@ export default function Settings({ settings, onChange }) {
     loadRoster()
   }, [])
   const [camMsg, setCamMsg] = useState('')
-  const [camCaps, setCamCaps] = useState(undefined) // undefined = a ler; null = a câmara não o indica
-  useEffect(() => {
-    let alive = true
-    acquireCamera(settings.cameraId)
-      .then((stream) => alive && setCamCaps(readCapabilities(stream.getVideoTracks()[0])))
-      .catch(() => alive && setCamCaps(null))
-    return () => {
-      alive = false
+  const [oriMsg, setOriMsg] = useState('')
+  const [evalRes, setEvalRes] = useState(null)
+  const [evalBusy, setEvalBusy] = useState(false)
+  // Avaliação: compara os rostos registados entre si (ver evaluate.js)
+  async function runEval() {
+    setEvalBusy(true)
+    try {
+      await initHuman()
+      setEvalRes(evaluate(await listWorkers(), similarity, thresholdFor(settings)))
+    } finally {
+      setEvalBusy(false)
     }
-  }, [settings.cameraId])
+  }
+  // Orientação: aplica e guarda logo ao tocar (precisa de um toque do utilizador para poder pedir o ecrã inteiro)
+  async function pickOrientation(mode) {
+    setS((x) => ({ ...x, orientation: mode }))
+    onChange({ ...settings, orientation: mode })
+    const r = await applyOrientation(mode, { gesture: true })
+    setOriMsg(r.ok ? (mode === 'auto' ? t('settings.orientationAutoOk') : t('settings.orientationOk')) : t('settings.orientationNoLock'))
+  }
   const [diagText_, setDiagText] = useState(null) // null = não pedido; '' = sem registo
   // Copia o registo de diagnóstico (e mostra-o, caso o navegador não deixe copiar)
   async function copyDiag() {
@@ -47,8 +60,8 @@ export default function Settings({ settings, onChange }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
 
   async function save() {
-    const reload = s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
-    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), camExposureMs: Number(s.camExposureMs), camFps: Number(s.camFps) }
+    const reload = s.engine !== settings.engine || s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
+    const next = { ...s, obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), thresholdSface: Number(s.thresholdSface) }
     onChange(next)
     setMsg(t('settings.saved'))
     if (next.obra.toLowerCase() !== (settings.obra || '').trim().toLowerCase()) {
@@ -138,6 +151,18 @@ export default function Settings({ settings, onChange }) {
                 <option value="system">{t('settings.themeSystem')}</option>
               </select>
             </label>
+            <div className="field">
+              {t('settings.orientation')}
+              <div className="lang-switch orient-switch" role="group" aria-label={t('settings.orientation')}>
+                {[['auto', 'settings.orientationAuto'], ['landscape', 'settings.orientationLandscape'], ['portrait', 'settings.orientationPortrait']].map(([k, label]) => (
+                  <button key={k} type="button" className={(s.orientation || 'auto') === k ? 'on' : ''} onClick={() => pickOrientation(k)}>
+                    {t(label)}
+                  </button>
+                ))}
+              </div>
+              <small>{t('settings.orientationNow', { o: t(currentOrientation() === 'landscape' ? 'settings.orientationLandscape' : 'settings.orientationPortrait') })}{canLock() ? '' : ` · ${t('settings.orientationNoLock')}`}</small>
+              {oriMsg && <small>{oriMsg}</small>}
+            </div>
           </section>
 
           <section className="card">
@@ -167,11 +192,19 @@ export default function Settings({ settings, onChange }) {
         <div className="settings-col">
           <section className="card">
             <h2>{t('settings.recognition')}</h2>
-            <label className="field">
-              {t('settings.threshold', { v: Number(s.threshold).toFixed(2) })}
-              <input type="range" min="0.3" max="0.9" step="0.01" value={s.threshold} onChange={set('threshold')} />
-              <small>{t('settings.thresholdHint')}</small>
-            </label>
+            {s.engine === 'sface' ? (
+              <label className="field">
+                {t('settings.thresholdSface', { v: Number(s.thresholdSface).toFixed(2) })}
+                <input type="range" min="0.2" max="0.8" step="0.01" value={s.thresholdSface} onChange={set('thresholdSface')} />
+                <small>{t('settings.thresholdSfaceHint')}</small>
+              </label>
+            ) : (
+              <label className="field">
+                {t('settings.threshold', { v: Number(s.threshold).toFixed(2) })}
+                <input type="range" min="0.3" max="0.9" step="0.01" value={s.threshold} onChange={set('threshold')} />
+                <small>{t('settings.thresholdHint')}</small>
+              </label>
+            )}
             <label className="field">
               {t('settings.cooldown')}
               <input className="field-input" type="number" min="0" value={s.cooldownSec} onChange={set('cooldownSec')} />
@@ -184,6 +217,14 @@ export default function Settings({ settings, onChange }) {
               <h2>{t('settings.advanced')}</h2>
               <small>{t('settings.advancedHint')}</small>
             </summary>
+            <label className="field">
+              {t('settings.engine')}
+              <select className="field-select" value={s.engine} onChange={set('engine')}>
+                <option value="faceres">{t('settings.engineFaceres')}</option>
+                <option value="sface">{t('settings.engineSface')}</option>
+              </select>
+              <small>{t('settings.engineHint')}</small>
+            </label>
             <label className="field">
               {t('settings.backend')}
               <select className="field-select" value={s.backend} onChange={set('backend')}>
@@ -212,28 +253,6 @@ export default function Settings({ settings, onChange }) {
               </label>
             </div>
             {toggle('fastLiveness', t('settings.fastLiveness'), t('settings.fastLivenessHint'))}
-            <label className="field">
-              {t('settings.camExposure')}
-              <select className="field-select" value={s.camExposure} onChange={set('camExposure')} disabled={!camCaps?.manual}>
-                <option value="auto">{t('settings.camAuto')}</option>
-                <option value="manual">{t('settings.camManual')}</option>
-              </select>
-              <small>{camCaps?.manual ? t('settings.camExposureHint') : camCaps === undefined ? '…' : t('settings.camExposureNone')}</small>
-            </label>
-            {s.camExposure === 'manual' && camCaps?.manual && (
-              <label className="field">
-                {t('settings.camExposureMs', { v: s.camExposureMs })}
-                <input type="range" min={camCaps.minMs} max={camCaps.maxMs} step="1" value={s.camExposureMs} onChange={set('camExposureMs')} />
-              </label>
-            )}
-            <label className="field">
-              {t('settings.camFps')}
-              <select className="field-select" value={String(s.camFps)} onChange={set('camFps')} disabled={!camCaps?.fps}>
-                <option value="0">{t('settings.camAuto')}</option>
-                <option value="15">15</option>
-                <option value="30">30</option>
-              </select>
-            </label>
           </details>
 
           <section className="card">
@@ -256,22 +275,21 @@ export default function Settings({ settings, onChange }) {
           </section>
 
           <section className="card">
-            <h2>{t('settings.schedule')}</h2>
-            {toggle('scheduleOn', t('settings.scheduleOn'), t('settings.scheduleHint'))}
-            {s.scheduleOn && (
-              <div className="field-pair">
-                <label className="field">
-                  {t('settings.scheduleFrom')}
-                  <input className="field-input" type="time" value={s.scheduleFrom} onChange={set('scheduleFrom')} />
-                </label>
-                <label className="field">
-                  {t('settings.scheduleTo')}
-                  <input className="field-input" type="time" value={s.scheduleTo} onChange={set('scheduleTo')} />
-                </label>
+            <h2>{t('settings.eval')}</h2>
+            <p className="muted" style={{ marginTop: 0 }}>{t('settings.evalHint')}</p>
+            <button type="button" className="btn btn-secondary btn-small" onClick={runEval} disabled={evalBusy}>
+              {t('settings.evalRun')}
+            </button>
+            {evalRes && !evalRes.enough && <p className="muted">{t('settings.evalNeed')}</p>}
+            {evalRes?.enough && (
+              <div className="settings-eval">
+                <p>{t('settings.evalDiff', { n: evalRes.impostor.n, mean: evalRes.impostor.mean.toFixed(2), max: evalRes.impostor.max.toFixed(2) })}</p>
+                {evalRes.genuine.n > 0 && <p>{t('settings.evalSame', { n: evalRes.genuine.n, mean: evalRes.genuine.mean.toFixed(2), min: evalRes.genuine.min.toFixed(2) })}</p>}
+                <p>{t('settings.evalFar', { thr: thresholdFor(settings).toFixed(2), far: (evalRes.far * 100).toFixed(1) })}</p>
+                <p>{t('settings.evalSuggest', { v: evalRes.suggested.toFixed(2) })}</p>
+                <p>{t('settings.evalClosest', { list: evalRes.closest.map((c) => `${c.names} (${c.sim.toFixed(2)})`).join('; ') })}</p>
               </div>
             )}
-            {s.scheduleOn && toggle('scheduleOffSat', t('settings.scheduleOffSat'), t('settings.scheduleOffHint'))}
-            {s.scheduleOn && toggle('scheduleOffSun', t('settings.scheduleOffSun'), t('settings.scheduleOffHint'))}
           </section>
 
           <section className="card">

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Kiosk from './views/Kiosk.jsx'
+import ScanClock from './views/ScanClock.jsx'
 import Enrol from './views/Enrol.jsx'
 import Punches from './views/Punches.jsx'
 import Settings from './views/Settings.jsx'
@@ -9,9 +10,8 @@ import { listWorkers, hasUsableAdmin, isUsable, pendingPunches } from './lib/db.
 import { useT, LanguageSwitch } from './lib/i18n.jsx'
 import { initHuman } from './lib/face.js'
 import { warmCamera, releaseCamera, acquireCamera } from './lib/useCamera.js'
-import { applyToTrack } from './lib/cameraControls.js'
-import { videoInfo } from './lib/diag.js'
-import { inHours, weekendOff, WAKE_MS } from './lib/schedule.js'
+import { WAKE_MS } from './lib/schedule.js'
+import { applyOrientation } from './lib/orientation.js'
 
 // Só o Administrador acede a estes separadores.
 const ADMIN_TABS = ['enrol', 'punches', 'settings']
@@ -49,14 +49,15 @@ function CameraKeepAlive({ deviceId }) {
   return <video ref={ref} className="camera-keepalive" muted playsInline aria-hidden="true" tabIndex={-1} />
 }
 
-// Ecrã de repouso (fora do horário de funcionamento): preto, sem câmara. Um toque ativa o tablet durante uns minutos.
-function SleepScreen({ settings, onWake }) {
+// Ecrã de repouso: preto, sem câmara. Um toque ativa o tablet durante uns minutos.
+// Só a frase do toque e, no canto inferior esquerdo, a data e a hora (o título e o motivo eram irrelevantes e foram
+// retirados a pedido do utilizador).
+function SleepScreen({ onWake }) {
   const { t } = useT()
   return (
     <button type="button" className="sleep-screen" onClick={onWake}>
-      <span className="sleep-title">{t('sleep.title')}</span>
-      <span>{weekendOff(settings) ? t('sleep.weekend') : t('sleep.range', { from: settings.scheduleFrom, to: settings.scheduleTo })}</span>
-      <span>{t('sleep.touch', { min: Math.round(WAKE_MS / 60000) })}</span>
+      {t('sleep.touch', { min: Math.round(WAKE_MS / 60000) })}
+      <ScanClock />
     </button>
   )
 }
@@ -69,58 +70,33 @@ export default function App() {
   const [hasAdmin, setHasAdmin] = useState(null) // null = a verificar
   const [admin, setAdmin] = useState(null) // sessão: { id, name }
   const [pending, setPending] = useState(0) // picagens por enviar
-  const [camReverted, setCamReverted] = useState(false) // a exposição manual foi desfeita por segurança
-  const [asleep, setAsleep] = useState(false) // fora do horário de funcionamento e sem toque recente
-  const wakeUntil = useRef(0) // até quando fica ativo depois de um toque fora do horário
-  const sleepingNow = () => !inHours(loadSettings()) && Date.now() > wakeUntil.current
+  // Repouso: o tablet está sempre em repouso (ecrã preto, câmara fechada) e só fica ativo durante WAKE_MS depois de um
+  // toque (ou de a app abrir); cada toque prolonga o tempo ativo. Não depende da hora nem do dia da semana.
+  const wakeUntil = useRef(Date.now() + WAKE_MS) // até quando fica ativo
+  const [asleep, setAsleep] = useState(false)
+  const sleepingNow = () => Date.now() > wakeUntil.current
 
-  // horário de funcionamento: recalcula de 15 em 15 s; qualquer toque fora do horário prolonga o tempo ativo
+  // recalcula de 15 em 15 s; qualquer toque prolonga o tempo ativo
   useEffect(() => {
-    const check = () => setAsleep(!inHours(settings) && Date.now() > wakeUntil.current)
+    const check = () => setAsleep(sleepingNow())
     check()
     const timer = setInterval(check, 15000)
     const extend = () => {
-      if (!inHours(settings)) wakeUntil.current = Date.now() + WAKE_MS
+      wakeUntil.current = Date.now() + WAKE_MS
     }
     window.addEventListener('pointerdown', extend)
+    window.addEventListener('keydown', extend) // quem escreve nas Definições também está a usar o tablet
     return () => {
       clearInterval(timer)
       window.removeEventListener('pointerdown', extend)
+      window.removeEventListener('keydown', extend)
     }
-  }, [settings])
-
-  // Atalho de emergência sem rosto nem Administrador: abrir o endereço da app com ?camauto repõe a câmara em automático.
-  // Só desfaz a exposição manual (o valor seguro), por isso não abre nada a ninguém.
-  useEffect(() => {
-    if (!new URLSearchParams(location.search).has('camauto')) return
-    const s = { ...loadSettings(), camExposure: 'auto', camFps: 0 }
-    saveSettings(s)
-    setSettings(s)
-    setCamReverted(true)
-    history.replaceState(null, '', location.pathname + location.hash)
-    acquireCamera(s.cameraId).then((stream) => applyToTrack(stream.getVideoTracks()[0], s)).catch(() => {})
   }, [])
 
-  // Rede de segurança: com a exposição manual, se a imagem fica preta (cerca de 6 s) volta sozinha a automático.
-  // Sem isto, uma exposição que deixe a imagem preta impede de reconhecer o Administrador e de chegar às Definições.
+  // orientação do ecrã escolhida nas Definições (onde o aparelho deixar fixá-la; ver orientation.js)
   useEffect(() => {
-    if (asleep || settings.camExposure !== 'manual') return
-    let dark = 0
-    const timer = setInterval(() => {
-      const v = document.querySelector('.camera-keepalive')
-      const lum = v ? videoInfo(v).lum : null
-      dark = typeof lum === 'number' && lum < 8 ? dark + 1 : 0
-      if (dark >= 3) {
-        clearInterval(timer)
-        const s = { ...loadSettings(), camExposure: 'auto' }
-        saveSettings(s)
-        setSettings(s)
-        setCamReverted(true)
-        acquireCamera(s.cameraId).then((stream) => applyToTrack(stream.getVideoTracks()[0], s)).catch(() => {})
-      }
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [asleep, settings.camExposure])
+    applyOrientation(settings.orientation || 'auto')
+  }, [settings.orientation])
 
   const wake = () => {
     wakeUntil.current = Date.now() + WAKE_MS
@@ -138,9 +114,9 @@ export default function App() {
     }
   }, [asleep])
 
-  // com horário ligado, o ecrã fica aceso durante o horário (e o sistema pode apagá-lo fora dele)
+  // enquanto o tablet está ativo o ecrã fica aceso; em repouso solta-se o bloqueio e o sistema pode apagá-lo
   useEffect(() => {
-    if (!settings.scheduleOn || asleep || !('wakeLock' in navigator)) return
+    if (asleep || !('wakeLock' in navigator)) return
     let lock = null
     let cancelled = false
     const request = async () => {
@@ -160,14 +136,14 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisible)
       lock?.release?.().catch(() => {})
     }
-  }, [settings.scheduleOn, asleep])
+  }, [asleep])
 
   // Modelos de reconhecimento e câmara abertos em segundo plano assim que a app abre (em qualquer ecrã),
   // para estarem prontos quando alguém carregar em Entrada/Saída. O pequeno atraso deixa a interface desenhar primeiro.
   useEffect(() => {
     const timer = setTimeout(() => {
       initHuman().catch(() => {})
-      if (!sleepingNow()) warmCamera(loadSettings().cameraId) // câmara sempre ligada (dentro do horário)
+      if (!sleepingNow()) warmCamera(loadSettings().cameraId) // câmara ligada enquanto o tablet está ativo
     }, 150)
     return () => clearTimeout(timer)
   }, [])
@@ -258,7 +234,6 @@ export default function App() {
     }
     saveSettings(s)
     setSettings(s)
-    acquireCamera(s.cameraId).then((stream) => applyToTrack(stream.getVideoTracks()[0], s)).catch(() => {}) // exposição e taxa de imagens
   }
 
   const onRegistered = (worker) => {
@@ -270,7 +245,7 @@ export default function App() {
 
   const current = blocked || hasAdmin === null ? 'kiosk' : route
 
-  if (asleep) return <SleepScreen settings={settings} onWake={wake} />
+  if (asleep) return <SleepScreen onWake={wake} />
 
   return (
     <>
@@ -298,11 +273,6 @@ export default function App() {
           {settings.deviceName} · {online ? t('kiosk.online') : t('kiosk.offline')} · {t('kiosk.pendingSend', { n: pending })}
         </span>
       </header>
-      {camReverted && (
-        <p className="notice notice-warn" style={{ margin: '0 16px 8px' }} onClick={() => setCamReverted(false)}>
-          {t('app.camReverted')}
-        </p>
-      )}
       {hasAdmin === false && !admin && (
         <p className="notice notice-warn" style={{ margin: '0 16px 8px' }}>
           {t('app.noAdmin')}

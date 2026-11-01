@@ -13,6 +13,7 @@
   "dependencies": {
     "@vladmandic/human": "^3.3.6",
     "idb": "^8.0.4",
+    "onnxruntime-web": "1.31.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

@@ -183,12 +183,15 @@ async function nextCounter() {
   return n
 }
 
+// A hora corrigida usa-se em cada picagem, em cada pedido ao relay (assinatura) e no relógio do ecrã: fica em memória depois da primeira leitura.
+let clockOffset = null
 export async function getClockOffset() {
-  const d = await db()
-  return (await d.get('meta', 'clockOffset')) || 0
+  if (clockOffset === null) clockOffset = (await (await db()).get('meta', 'clockOffset')) || 0
+  return clockOffset
 }
 
 export async function setClockOffset(ms) {
+  clockOffset = ms
   const d = await db()
   await d.put('meta', ms, 'clockOffset')
 }

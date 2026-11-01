@@ -20,7 +20,7 @@ const MIN_OPEN = 0.15 // abaixo disto o olho já estava quase fechado: não serv
 const GRACE_MS = 800 // rosto não detetado durante menos do que isto: mantém a janela, o piscar e a identidade
 
 // Abertura média dos dois olhos, a partir da malha facial (mesmos pontos que o Human usa para o piscar).
-export function eyeOpenness(mesh) {
+function eyeOpenness(mesh) {
   if (!mesh || mesh.length < 451) return null
   const left = Math.abs(mesh[374][1] - mesh[386][1]) / Math.abs(mesh[443][1] - mesh[450][1])
   const right = Math.abs(mesh[145][1] - mesh[159][1]) / Math.abs(mesh[223][1] - mesh[230][1])

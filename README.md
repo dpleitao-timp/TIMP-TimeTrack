@@ -14,7 +14,7 @@ npm run build && npm run preview   # PWA com service worker (teste offline)
 - **Picar** (`#/kiosk`): modo quiosque: primeiro escolhe-se Entrada ou Saída e só então a câmara liga; depois de picar (ou 45 s sem picar, ou "Voltar") a câmara desliga e volta à escolha. Deteção de vida (piscar/virar a cabeça), "Olá, <nome> — Entrada 08:02".
 - **Registar** (`#/enrol`): registo por **SAGE ID + nome**, captura guiada de 5 poses (cada pose guarda a média de 5 fotogramas); só guarda vetores cifrados, nunca fotografias.
 - **Picagens** (`#/punches`): picagens guardadas neste tablet (o Administrador pode apagar qualquer uma; se já tinha sido enviada, o pedido de apagar segue pelo relay e o Supabase apaga-a, ver "Apagar picagens já enviadas"), com resumo por trabalhador (picagens sem par) e métricas do piloto. O chefe de equipa vê as picagens na app de timesheets, alimentada pelo Supabase; o tablet não lê dados da cloud.
-- **Definições**: obra (obrigatória: sem ela não se pica; vai em todas as picagens), função do tablet (entradas e saídas, só entradas ou só saídas), aspeto, limiar de confiança, deteção de vida, intervalo entre picagens, URL do relay e token do dispositivo.
+- **Definições**: obra (obrigatória: sem ela não se pica; vai em todas as picagens), função do tablet (entradas e saídas, só entradas ou só saídas), aspeto, limiar de confiança, deteção de vida, intervalo entre picagens, URL do relay e código de instalação (uso único).
 - **Idiomas**: PT, FR, EN e DE (seletor sempre visível no cabeçalho; por omissão segue o idioma do navegador). As traduções estão em `src/lib/i18n.jsx`.
 
 ## Como as picagens chegam ao Supabase (o Supabase lê, o tablet só escreve)

@@ -4,7 +4,7 @@ const KEY = 'timp-ponto-settings'
 // Motor de reconhecimento: 'faceres' (o do Human) ou 'sface' (rede da família ArcFace, ver sface.js). Cada registo guarda
 // o motor com que foi feito; os de outro motor ficam obsoletos até se atualizar a biometria (os vetores de um motor não
 // servem noutro). Mudar de motor recarrega a app.
-export const ENGINES = ['faceres', 'sface']
+const ENGINES = ['faceres', 'sface']
 
 const DEFAULTS = {
   detectorConfidence: 0.4, // confiança mínima da deteção do rosto (mais baixa = deteta melhor com capacete/óculos)
@@ -19,7 +19,7 @@ const DEFAULTS = {
   relayUrl: '', // relay Cloudflare onde o tablet escreve (o Supabase vai lá buscar)
   engine: 'faceres', // motor de reconhecimento
   threshold: 0.55, // similaridade mínima do FaceRes (0..1)
-  thresholdSface: 0.45, // semelhança mínima do SFace (cosseno, -1..1): escala diferente da do FaceRes, não se aproveitam os valores
+  thresholdSface: 0.7, // semelhança mínima do SFace (cosseno, -1..1): escala diferente da do FaceRes, não se aproveitam os valores. 0,70 fica 0,34 acima do pior caso medido entre pessoas diferentes (0,36) e 0,14 abaixo da pior leitura real (0,84); cada tablet afina-o com a Avaliação do reconhecimento
   liveness: true, // exige piscar / virar a cabeça
   cooldownSec: 60, // ignora nova picagem do mesmo trabalhador
   stableFrames: 2, // avaliações seguidas com a mesma identidade
@@ -113,10 +113,10 @@ export function bumpStat(name, ms) {
 export const resetStats = () => localStorage.removeItem(STATS_KEY)
 
 // O tablet fala com o relay se tem o endereço e uma credencial: a chave própria (enrolled) ou, nos tablets das versões anteriores, o token.
-export const hasCredential = (s) => s.enrolled === true || !!String(s.deviceToken ?? '').trim()
+const hasCredential = (s) => s.enrolled === true || !!String(s.deviceToken ?? '').trim()
 export const isCloudConfigured = (s) => !!(s.relayUrl && hasCredential(s))
 
 // Campos sem os quais o tablet não funciona (não pica): dizem quem é, onde está e como fala com o relay.
-export const REQUIRED_FIELDS = ['deviceName', 'deviceId', 'obra', 'relayUrl', 'deviceToken']
+const REQUIRED_FIELDS = ['deviceName', 'deviceId', 'obra', 'relayUrl', 'deviceToken']
 // Os que faltam, pela ordem das Definições. O "token" é o código de instalação: está satisfeito se o tablet já se ligou ao relay.
 export const missingFields = (s) => REQUIRED_FIELDS.filter((k) => (k === 'deviceToken' ? !hasCredential(s) : !String(s[k] ?? '').trim()))

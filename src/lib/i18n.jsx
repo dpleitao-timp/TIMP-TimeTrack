@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 // Idiomas suportados. `locale` é usado nas datas e horas.
-export const LANGS = [
+const LANGS = [
   { code: 'pt', label: 'Português', locale: 'pt-PT' },
   { code: 'fr', label: 'Français', locale: 'fr-FR' },
   { code: 'en', label: 'English', locale: 'en-GB' },

@@ -7,7 +7,7 @@
 // luz. Entre LOW e HIGH não mexe (zona morta), para a moldura e a exposição da câmara não oscilarem uma contra a outra.
 import { faceLuma, saturation } from './diag.js'
 
-export const FRAME_DEFAULT = 3 // espessura mínima, em vmin (1 vmin = 1% do lado mais pequeno do ecrã)
+const FRAME_DEFAULT = 3 // espessura mínima, em vmin (1 vmin = 1% do lado mais pequeno do ecrã)
 const FRAME_MIN = FRAME_DEFAULT
 const FRAME_MAX = 16
 const STEP_MIN = 0.8 // passo mínimo por ajuste

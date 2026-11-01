@@ -48,10 +48,6 @@ function corsHeaders(env) {
 const json = (body, status = 200, extra = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra } })
 
-// Regista que o tablet acabou de falar com o relay (batimento do relógio). Só depois de autenticado.
-const touchDevice = (env, deviceId) =>
-  env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000), deviceId).run()
-
 // Assinatura do Supabase: HMAC-SHA256(PULL_SECRET, método \n caminho+query \n timestamp \n corpo)
 async function verifySignature(request, url, bodyText, secret) {
   if (!secret) return false
@@ -114,13 +110,17 @@ async function authDevice(request, url, env, bodyText) {
     }
   }
   if (!ok) return { error: json({ error: 'invalid_device' }, 401, cors) }
-  // pedido já visto? Guarda-se o nonce e limpam-se os antigos (os de mais de 10 minutos já não passam a verificação da hora)
-  const [seen] = await env.DB.batch([
+  // Pedido já visto? Numa só ida à base de dados: guarda-se o nonce e atualiza-se o último contacto do tablet, mas só se o nonce era novo (`changes()` conta as
+  // linhas da instrução anterior), por isso repetir um pedido apanhado não faz o tablet parecer vivo. Os nonces com mais de 10 minutos já não passam a
+  // verificação da hora, por isso limpam-se só de vez em quando (1 pedido em 16) e não a cada pedido.
+  const nowS = Math.floor(Date.now() / 1000)
+  const stmts = [
     env.DB.prepare('INSERT OR IGNORE INTO device_nonces (device_id, nonce, ts) VALUES (?, ?, ?)').bind(deviceId, nonce, Number(ts)),
-    env.DB.prepare('DELETE FROM device_nonces WHERE ts < ?').bind(Math.floor(Date.now() / 1000) - SIGNATURE_SKEW_S * 2),
-  ])
+    env.DB.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND changes() > 0').bind(nowS, deviceId),
+  ]
+  if (Math.random() < 1 / 16) stmts.push(env.DB.prepare('DELETE FROM device_nonces WHERE ts < ?').bind(nowS - SIGNATURE_SKEW_S * 2))
+  const [seen] = await env.DB.batch(stmts)
   if (!seen.meta.changes) return { error: json({ error: 'replay' }, 401, cors) }
-  await touchDevice(env, deviceId)
   return { device }
 }
 

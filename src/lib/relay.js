@@ -14,14 +14,21 @@ const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(
 const sha256Hex = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('')
 const base = (settings) => settings.relayUrl.replace(/\/$/, '')
 
-// A chave do dispositivo: cria-se uma só vez e fica guardada. A chave pública exporta-se sempre; a privada nunca.
-async function deviceKeys() {
-  let keys = await getDeviceKeys()
-  if (!keys) {
-    keys = await crypto.subtle.generateKey(ECDSA, false, ['sign', 'verify'])
-    await saveDeviceKeys(keys)
-  }
-  return keys
+// A chave do dispositivo: cria-se uma só vez e fica guardada (e em memória, para não ler a IndexedDB a cada pedido). A chave pública exporta-se sempre; a privada nunca.
+let keysPromise
+function deviceKeys() {
+  keysPromise ??= (async () => {
+    let keys = await getDeviceKeys()
+    if (!keys) {
+      keys = await crypto.subtle.generateKey(ECDSA, false, ['sign', 'verify'])
+      await saveDeviceKeys(keys)
+    }
+    return keys
+  })().catch((e) => {
+    keysPromise = undefined
+    throw e
+  })
+  return keysPromise
 }
 
 async function signedHeaders(settings, method, pathAndQuery, bodyText) {
@@ -82,7 +89,7 @@ export function markEnrolled() {
 
 // Tablets que já tinham um token (versões anteriores): ligam-se sozinhos com ele, uma só vez; o token deixa de valer no relay.
 let enrolling = null
-export function ensureEnrolled() {
+function ensureEnrolled() {
   const cur = loadSettings() // o que está guardado (quem chama pode ter uma cópia antiga das definições)
   if (cur.enrolled === true || !cur.deviceToken || !cur.relayUrl) return Promise.resolve()
   enrolling ??= enrollWithCode(cur, cur.deviceToken)

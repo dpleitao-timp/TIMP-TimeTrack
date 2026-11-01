@@ -200,6 +200,18 @@ check('pedido assinado com um nonce novo passa', r.status === 200, String(r.stat
 r = await dev.req('GET', roster9, undefined, { nonce: NONCE })
 j = await r.json().catch(() => ({}))
 check('repetir o mesmo pedido assinado (mesmo nonce) → 401 replay', r.status === 401 && j.error === 'replay', JSON.stringify(j))
+// o último contacto do tablet só se atualiza com pedidos novos: repetir um pedido apanhado (mesmo nonce) não o faz parecer vivo
+const lastSeen = async () => (await (await signed('GET', '/devices-status')).json()).devices.find((d) => d.id === DEVICE)?.lastSeen
+const seen0 = await lastSeen()
+await new Promise((x) => setTimeout(x, 1200))
+const NONCE2 = ('M' + Date.now().toString(36) + Math.random().toString(36).slice(2)).padEnd(20, 'x')
+await dev.req('GET', roster9, undefined, { nonce: NONCE2 })
+const seen1 = await lastSeen()
+await new Promise((x) => setTimeout(x, 1200))
+r = await dev.req('GET', roster9, undefined, { nonce: NONCE2 })
+const seen2 = await lastSeen()
+check('um pedido novo atualiza o último contacto', seen1 > seen0, `${seen0} ${seen1}`)
+check('repetir o pedido (mesmo nonce) → 401 e NÃO atualiza o último contacto', r.status === 401 && seen2 === seen1, `${r.status} ${seen1} ${seen2}`)
 r = await dev.req('GET', roster9, undefined, { ts: Math.floor(Date.now() / 1000) - 3600 })
 j = await r.json().catch(() => ({}))
 check('hora muito desacertada → 401 bad_timestamp com a hora do relay (o tablet acerta-se)', r.status === 401 && j.error === 'bad_timestamp' && Number.isFinite(Date.parse(j.serverTime)), JSON.stringify(j))

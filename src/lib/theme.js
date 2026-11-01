@@ -3,8 +3,8 @@
 // atributo e deixa o prefers-color-scheme mandar (ver styles.css).
 const STORAGE_KEY = 'timp-ponto-theme'
 
-export const THEMES = ['light', 'dark', 'system']
-export const DEFAULT_THEME = 'light'
+const THEMES = ['light', 'dark', 'system']
+const DEFAULT_THEME = 'light'
 
 function applyTheme(theme) {
   if (theme === 'system') delete document.documentElement.dataset.theme

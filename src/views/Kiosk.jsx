@@ -382,13 +382,15 @@ function Scan({ settings, direction, onDone }) {
   )
 }
 
-// Uma refeição: prato com garfo e faca (almoço/jantar).
+// Uma refeição: tigela a fumegar (almoço/jantar).
 function IconMeal({ size = 30 }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="4.2" />
-      <path d="M2.8 3v5.5a2 2 0 0 0 4 0V3M4.8 3v18" />
-      <path d="M21.2 21V3c-2 1.4-3 4-3 7v3.5h3" />
+      <path d="M3 11h18a9 9 0 0 1-18 0z" />
+      <path d="M8.5 21h7" />
+      <path d="M8 3.5c-1 1.2 1 2.3 0 3.5" />
+      <path d="M12 2.5c-1 1.2 1 2.3 0 3.5" />
+      <path d="M16 3.5c-1 1.2 1 2.3 0 3.5" />
     </svg>
   )
 }

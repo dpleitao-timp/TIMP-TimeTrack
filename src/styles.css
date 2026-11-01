@@ -315,17 +315,29 @@ th { color: var(--text-muted); font-size: 0.75rem; font-weight: 700; letter-spac
 /* Vídeo sempre ligado à câmara (ver CameraKeepAlive em App.jsx): minúsculo e quase invisível, mas desenhado. */
 .camera-keepalive { position: fixed; right: 0; bottom: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; }
 .kiosk-dock { display: flex; align-items: center; justify-content: center; gap: 12px; flex-shrink: 0; }
-.choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 16px; text-align: center; }
+.choice { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; padding-bottom: 60px; text-align: center; }
+/* Data e hora do ecrã inicial: canto inferior direito, por cima da linha pequena da versão (que é fixa em baixo à direita) */
+.choice .choice-clock { position: absolute; right: 2px; bottom: 24px; padding: 6px 14px; border-radius: 99px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.95rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; box-shadow: var(--shadow); }
 .choice-buttons { display: flex; gap: 18px; width: 100%; max-width: 720px; margin-top: 18px; }
 .choice-btn { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 170px; border: 0; border-radius: var(--radius-lg); color: #fff; font-size: 2rem; font-weight: 800; letter-spacing: 0.04em; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25); }
 .choice-btn.in { background: var(--ok); }
 .choice-btn.out { background: var(--accent); }
-/* Almoço/jantar (opcional): segunda fila, botões mais baixos */
-.choice-meal { margin-top: 0; }
-.choice-btn.small { min-height: 104px; gap: 8px; font-size: 1.25rem; padding: 0 12px; }
-.choice-btn.meal-out { background: var(--accent); } /* mesma cor da saída */
-.choice-btn.meal-in { background: var(--ok); } /* mesma cor da entrada */
-.choice-icons { display: inline-flex; align-items: center; gap: 10px; }
+/* Almoço/jantar (opcional): os 4 botões numa linha (Entrada, Saída para almoço/jantar, Entrada de almoço/jantar, Saída), todos iguais.
+   Verde = entrada, vermelho = saída. Sempre numa linha de 4 (em ecrã estreito só encolhe o texto). */
+.choice-btn.meal-out { background: var(--accent); }
+.choice-btn.meal-in { background: var(--ok); }
+.choice-icons { display: inline-flex; align-items: center; gap: 6px; }
+/* Ecrã de leitura: movimento repetido hoje, escolher entre os que faltam (mesmas cores e ordem dos botões do ecrã inicial) */
+.pick-overlay { position: absolute; left: 12px; right: 12px; bottom: 56px; z-index: 3; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.97); color: var(--text); box-shadow: var(--shadow); }
+.pick-title { text-align: center; font-size: 1.15rem; font-weight: 700; }
+.pick-buttons { display: flex; gap: 10px; }
+.pick-overlay .choice-btn { flex: 1 1 0; min-width: 0; min-height: 110px; gap: 6px; padding: 0 6px; font-size: 1.05rem; line-height: 1.15; text-align: center; }
+.choice-buttons.has-meal { max-width: 1040px; gap: 12px; }
+.choice-buttons.has-meal .choice-btn { flex: 1 1 0; min-width: 0; min-height: 150px; gap: 8px; font-size: 1.15rem; padding: 0 8px; line-height: 1.15; text-align: center; }
+@media (max-width: 760px) {
+  .choice-buttons.has-meal { gap: 8px; }
+  .choice-buttons.has-meal .choice-btn { min-height: 130px; font-size: 0.9rem; padding: 0 4px; }
+}
 .choice-btn:active { transform: scale(0.98); }
 .choice-admin { margin-top: 22px; min-height: 48px; }
 .kiosk.admin .dir { background: var(--accent); }
@@ -354,6 +366,20 @@ body::before {
 .kiosk.in .dir { background: var(--ok); }
 .kiosk.out .dir { background: var(--accent); }
 .kiosk.meal-out .dir { background: var(--accent); }
+/* Picagem validada: visto verde grande no canto superior direito da IMAGEM visível, isto é, dentro da moldura branca. A moldura é adaptativa
+   (a espessura vem de lightframe.js em --light-frame e --light-frame-x; as laterais com o limite de 22vw, e em ecrã vertical igual em todos
+   os lados), por isso o visto segue a mesma espessura e anda com ela. A etiqueta da obra NÃO se mexe (fica no canto do ecrã, como sempre);
+   se a moldura for fina e o visto lhe ficasse por cima, o visto desce para ficar logo abaixo da etiqueta (12 + 48 + 8 = 68 px). */
+.kiosk {
+  --badge: 96px;
+  --badge-top: max(calc(var(--light-frame) + 12px), 68px);
+  --badge-right: calc(min(var(--light-frame-x, var(--light-frame)), 22vw) + 12px);
+}
+@media (orientation: portrait) { .kiosk { --badge-right: calc(var(--light-frame) + 12px); } }
+.kiosk .punch-ok { position: absolute; top: var(--badge-top); right: var(--badge-right); z-index: 4; display: grid; place-items: center; width: var(--badge); height: var(--badge); border: 5px solid #fff; border-radius: 50%; background: var(--ok); color: #fff; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5); transition: top 0.6s ease, right 0.6s ease; animation: punch-pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.kiosk .punch-ok svg { width: 60px; height: 60px; }
+@keyframes punch-pop { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .kiosk .punch-ok { animation: none; } }
 .kiosk.meal-in .dir { background: var(--ok); }
 
 .banner {

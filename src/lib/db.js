@@ -94,7 +94,7 @@ export async function listWorkers() {
 // Identificação dos registos sem decifrar nada (barato): id, motor, perfil.
 export async function listWorkerHeads() {
   const d = await db()
-  return (await d.getAll('workers')).map((w) => ({ id: w.id, engine: w.engine ?? 'faceres', role: w.role === 'admin' ? 'admin' : 'user', createdAt: w.createdAt }))
+  return (await d.getAll('workers')).map((w) => ({ id: w.id, engine: w.engine ?? 'faceres', role: w.role === 'admin' ? 'admin' : 'user', createdAt: w.createdAt, rev: w.rev }))
 }
 
 // Registos utilizáveis (motor atual, legíveis) cuja biometria ainda não foi enviada ao relay.
@@ -167,10 +167,44 @@ export async function setWorkerRole(id, role) {
   await d.put('workers', { ...w, role })
 }
 
-export async function deleteWorker(id) {
+// propagate: o apagar tem de chegar a todos os tablets e ao Supabase (fila `bioDelQueue`, enviada por bio.js). Fica a falso
+// quando o apagar veio de outro tablet (senão voltava a ser enviado).
+export async function deleteWorker(id, { propagate = true } = {}) {
   await assertNotLastAdmin(id, { allowIfOnlyWorker: true })
   const d = await db()
   await d.delete('workers', id)
+  if (propagate) await queueBioDeletion(id)
+}
+
+// --- Apagar biometria em todos os tablets: fila de pedidos por enviar, lápides já vistas e versão da lista do relay ---
+export async function queueBioDeletion(id, at = Date.now()) {
+  const d = await db()
+  const q = (await d.get('meta', 'bioDelQueue')) || []
+  await d.put('meta', [...q.filter((x) => x.sageId !== id), { sageId: id, at }], 'bioDelQueue')
+}
+
+export async function getBioDeletionQueue() {
+  return (await (await db()).get('meta', 'bioDelQueue')) || []
+}
+
+// Tira da fila os pedidos já enviados (só se não houve um pedido mais recente do mesmo trabalhador entretanto).
+export async function clearBioDeletions(done) {
+  const d = await db()
+  const q = (await d.get('meta', 'bioDelQueue')) || []
+  await d.put('meta', q.filter((x) => !done.some((y) => y.sageId === x.sageId && y.at === x.at)), 'bioDelQueue')
+}
+
+// Lápides já vistas ({ sageId: momento do apagar }) e a versão da lista que o relay deu: impedem que se volte a importar biometria
+// apagada e permitem não pedir a lista inteira de cada vez.
+export async function getBioTombs() {
+  const d = await db()
+  return { map: (await d.get('meta', 'bioTombs')) || {}, version: (await d.get('meta', 'bioTombVersion')) || '' }
+}
+
+export async function saveBioTombs(map, version) {
+  const d = await db()
+  await d.put('meta', map, 'bioTombs')
+  await d.put('meta', version, 'bioTombVersion')
 }
 
 // --- Contador e deslocamento de relógio ---
@@ -272,6 +306,24 @@ export async function msSinceLastPunch(sageId) {
   if (!last) return Infinity
   const now = Date.now() + (await getClockOffset()) // mesma hora usada ao gravar a picagem
   return Math.max(0, now - new Date(last.punchedAt).getTime())
+}
+
+// O "dia" de trabalho acaba às 05:00 da manhã (para acomodar o turno da noite): uma picagem às 02:00 conta para o dia anterior e o dia novo
+// começa às 05:00. Por agora é fixo.
+export const DAY_STARTS_AT_HOUR = 5
+
+// Tipos de picagem que este trabalhador já tem NO DIA DE TRABALHO ATUAL neste tablet (o dia vai das 05:00 às 05:00 do dia seguinte,
+// no fuso do tablet, com a hora corrigida pelo servidor, como a que se grava na picagem). Contam as que estão na fila (as apagadas e as
+// recusadas pelo relay não). Só vê o que se picou neste tablet.
+export async function directionsToday(sageId) {
+  const offset = await getClockOffset()
+  const key = (t) => {
+    const x = new Date(new Date(t).getTime() - DAY_STARTS_AT_HOUR * 36e5) // recua 5 h: assim 00:00 a 04:59 pertencem ao dia anterior
+    return `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`
+  }
+  const today = key(Date.now() + offset)
+  const mine = (await listQueue()).filter((p) => (p.sageId ?? p.workerId) === sageId && !p.rejected && key(p.punchedAt) === today)
+  return new Set(mine.map((p) => p.direction))
 }
 
 export async function listQueue() {

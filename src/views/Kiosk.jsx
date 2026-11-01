@@ -2,19 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, backendName } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
-import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch } from '../lib/db.js'
+import { listWorkers, enqueuePunch, pendingPunches, msSinceLastPunch, directionsToday } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
 import { diagStart, diagPush, videoInfo, faceLuma, faceNoise, saturation } from '../lib/diag.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
-import { BAD_SHOW_MS, isAlive } from '../lib/scanrules.js'
+import { BAD_SHOW_MS, isAlive, allowedDirections } from '../lib/scanrules.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
 import ScanClock from './ScanClock.jsx'
 
 const fmtTime = (iso, locale) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 const SCAN_TIMEOUT_MS = 45000 // sem picar, a câmara desliga e volta à escolha
+const CHOICE_MS = 20000 // a escolher o movimento: sem escolher, volta ao ecrã inicial
 
 // Tipos de picagem. in/out são a entrada e a saída da obra; meal_out/meal_in (opcionais, ligados nas Definições) são a saída
 // para almoço/jantar e a volta. O valor é o que se grava e se envia; cls é a classe de estilo.
@@ -32,6 +33,7 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
   const [adminLogin, setAdminLogin] = useState(false)
   const [modelsError, setModelsError] = useState('')
   const modelsState = useModelsReady()
+  const ico = settings.mealPunches ? 44 : 72 // com as 4 opções os ícones são mais pequenos (cabem 4 numa linha)
 
   useEffect(() => {
     // modelos pré-carregados para a câmara reconhecer logo ao ligar (a câmara não é ligada aqui)
@@ -68,48 +70,47 @@ export default function Kiosk({ settings, hasAdmin, onAdminUnlock, setPending })
       <div className="choice">
         {modelsState === 'loading' && <p className="muted preparing">⏳ {t('kiosk.preparing')}</p>}
         {!settings.obra?.trim() && <p className="notice notice-warn">{t('kiosk.noObra')}</p>}
-        <div className="choice-buttons">
+        {/* Uma só linha, por esta ordem: Entrada, Saída para almoço/jantar, Entrada de almoço/jantar, Saída. Cores: verde = entrada,
+            vermelho = saída. Os botões têm todos o mesmo tamanho. Num tablet só de entradas ou só de saídas mostram-se os que se aplicam. */}
+        <div className={`choice-buttons ${settings.mealPunches ? 'has-meal' : ''}`}>
           {settings.mode !== 'out' && (
             <button type="button" className="choice-btn in" disabled={!settings.obra?.trim()} onClick={() => setDirection('in')}>
-              <IconIn size={72} />
+              <IconIn size={ico} />
               <span>{t('dir.in')}</span>
+            </button>
+          )}
+          {settings.mealPunches && settings.mode !== 'in' && (
+            <button type="button" className="choice-btn meal-out" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_out')}>
+              <span className="choice-icons">
+                <IconMeal size={ico} />
+                <IconOut size={ico} />
+              </span>
+              <span>{t('dir.mealOut')}</span>
+            </button>
+          )}
+          {settings.mealPunches && settings.mode !== 'out' && (
+            <button type="button" className="choice-btn meal-in" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_in')}>
+              <span className="choice-icons">
+                <IconMeal size={ico} />
+                <IconIn size={ico} />
+              </span>
+              <span>{t('dir.mealIn')}</span>
             </button>
           )}
           {settings.mode !== 'in' && (
             <button type="button" className="choice-btn out" disabled={!settings.obra?.trim()} onClick={() => setDirection('out')}>
-              <IconOut size={72} />
+              <IconOut size={ico} />
               <span>{t('dir.out')}</span>
             </button>
           )}
         </div>
-        {settings.mealPunches && (
-          <div className="choice-buttons choice-meal">
-            {settings.mode !== 'in' && (
-              <button type="button" className="choice-btn small meal-out" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_out')}>
-                <span className="choice-icons">
-                  <IconMeal size={48} />
-                  <IconOut size={40} />
-                </span>
-                <span>{t('dir.mealOut')}</span>
-              </button>
-            )}
-            {settings.mode !== 'out' && (
-              <button type="button" className="choice-btn small meal-in" disabled={!settings.obra?.trim()} onClick={() => setDirection('meal_in')}>
-                <span className="choice-icons">
-                  <IconMeal size={48} />
-                  <IconIn size={40} />
-                </span>
-                <span>{t('dir.mealIn')}</span>
-              </button>
-            )}
-          </div>
-        )}
         {modelsError && <p className="notice notice-error">{t('kiosk.modelsFail', { err: modelsError })}</p>}
         {hasAdmin && (
           <button type="button" className="btn btn-secondary choice-admin" onClick={() => setAdminLogin(true)}>
             {t('kiosk.admin')}
           </button>
         )}
+        <ScanClock className="choice-clock" /> {/* data e hora sempre visíveis no canto inferior direito */}
       </div>
     </div>
   )
@@ -129,9 +130,30 @@ function Scan({ settings, direction, setPending, onDone }) {
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
 
-  const dir = DIRS[direction] ?? DIRS.in
-  const isMeal = direction === 'meal_out' || direction === 'meal_in'
-  const isArrival = direction === 'in' || direction === 'meal_in' // entrada (da obra ou do almoço/jantar)
+  // Movimento repetido: se o trabalhador já tem hoje o tipo de picagem que escolheu, em vez de o repetir pergunta qual o movimento e só
+  // propõe os que ainda não tem (assim não ficam dois movimentos do mesmo tipo no mesmo dia). `choice` mostra a pergunta; `picked`
+  // é o tipo escolhido (o cabeçalho passa a mostrá-lo); `pending` guarda quem foi reconhecido enquanto se escolhe.
+  const [choice, setChoice] = useState(null) // null | { name, dup, options }
+  const [picked, setPicked] = useState(null)
+  const pending = useRef(null)
+  const recordRef = useRef(null)
+  const choiceTimer = useRef(null)
+
+  const shownDirection = picked ?? direction
+  const punched = banner.kind === 'ok' && !choice // a picagem acabou de ser validada
+  const dir = DIRS[shownDirection] ?? DIRS.in
+  const isMeal = shownDirection === 'meal_out' || shownDirection === 'meal_in'
+  const isArrival = shownDirection === 'in' || shownDirection === 'meal_in' // entrada (da obra ou do almoço/jantar)
+
+  const pick = async (d) => {
+    clearTimeout(choiceTimer.current)
+    const p = pending.current
+    if (!p) return
+    pending.current = null
+    setChoice(null)
+    setPicked(d)
+    await recordRef.current?.(d, p.worker, p.r)
+  }
 
   useEffect(() => {
     if (!ready) return
@@ -157,6 +179,36 @@ function Scan({ settings, direction, setPending, onDone }) {
       const autoFrame = settingsRef.current.lightFrameAuto !== false
       light = createLightControl((v) => setFrameVars(kioskRef.current, v, autoFrame), autoFrame)
       if (!workers.some((w) => !w.stale && !w.broken)) show({ kind: 'warn', text: workers.length ? t('kiosk.staleWorkers') : t('kiosk.noWorkers') })
+
+      // Grava a picagem do tipo `d` para `worker` (r = a leitura do reconhecedor que o identificou) e mostra a confirmação.
+      const record = async (d, worker, r) => {
+        const s = settingsRef.current
+        const ms = Math.round(performance.now() - r.start)
+        const punch = await enqueuePunch({
+          deviceId: s.deviceId,
+          direction: d,
+          obra: s.obra.trim(),
+          sageId: worker.id,
+          workerName: worker.name,
+          confidence: r.similarity,
+          second: r.hasSecond ? r.second : null, // o 2º mais parecido e os valores do anti-foto: só para afinar o sistema
+          real: r.real,
+          live: r.live,
+        })
+        bumpStat('punches', ms)
+        show({
+          kind: 'ok',
+          text: t('kiosk.hello', { name: worker.name }),
+          sub: `${t((DIRS[d] ?? DIRS.in).label)} ${fmtTime(punch.punchedAt, locale)}`,
+        })
+        setPending((await pendingPunches()).length)
+        flushQueue(s).then((res) => setPending(res.pending))
+        recognizer.reset()
+        pauseUntil = performance.now() + 3500
+        // registado: a câmara desliga e volta ao ecrã de escolha
+        timers.push(setTimeout(() => onDoneRef.current(), 3500))
+      }
+      recordRef.current = record
 
       const loop = async () => {
         if (stop) return
@@ -205,7 +257,7 @@ function Scan({ settings, direction, setPending, onDone }) {
           }
 
           // r.status === 'match': média dos fotogramas coincide com um trabalhador, de forma estável
-          const { worker, similarity } = r
+          const { worker } = r
           if (!alive) {
             show({ kind: 'warn', text: t('kiosk.blink', { name: worker.name }) })
             return requestAnimationFrame(loop)
@@ -217,30 +269,24 @@ function Scan({ settings, direction, setPending, onDone }) {
             recognizer.reset()
             return requestAnimationFrame(loop)
           }
-          const ms = Math.round(performance.now() - r.start)
-          const punch = await enqueuePunch({
-            deviceId: s.deviceId,
-            direction,
-            obra: s.obra.trim(),
-            sageId: worker.id,
-            workerName: worker.name,
-            confidence: similarity,
-            second: r.hasSecond ? r.second : null, // o 2º mais parecido e os valores do anti-foto: só para afinar o sistema
-            real: r.real,
-            live: r.live,
-          })
-          bumpStat('punches', ms)
-          show({
-            kind: 'ok',
-            text: t('kiosk.hello', { name: worker.name }),
-            sub: `${t(dir.label)} ${fmtTime(punch.punchedAt, locale)}`,
-          })
-          setPending((await pendingPunches()).length)
-          flushQueue(s).then((res) => setPending(res.pending))
-          recognizer.reset()
-          pauseUntil = performance.now() + 3500
-          // registado: a câmara desliga e volta ao ecrã de escolha
-          timers.push(setTimeout(() => onDoneRef.current(), 3500))
+          // Já tem este tipo de movimento hoje? Pergunta qual o movimento, só com os que ainda não tem.
+          const taken = await directionsToday(worker.id)
+          if (taken.has(direction)) {
+            const options = allowedDirections(s).filter((d) => !taken.has(d))
+            recognizer.reset()
+            if (!options.length) {
+              show({ kind: 'warn', text: t('kiosk.allDoneToday', { name: worker.name }) })
+              pauseUntil = performance.now() + 4000
+              timers.push(setTimeout(() => onDoneRef.current(), 4000))
+              return requestAnimationFrame(loop)
+            }
+            pending.current = { worker, r }
+            pauseUntil = performance.now() + CHOICE_MS + 2000 // o reconhecimento fica parado enquanto se escolhe
+            setChoice({ name: worker.name, dup: direction, options })
+            choiceTimer.current = setTimeout(() => onDoneRef.current(), CHOICE_MS)
+            return requestAnimationFrame(loop)
+          }
+          await record(direction, worker, r)
         } catch (e) {
           console.error(e)
         }
@@ -252,6 +298,7 @@ function Scan({ settings, direction, setPending, onDone }) {
     return () => {
       stop = true
       timers.forEach(clearTimeout)
+      clearTimeout(choiceTimer.current)
     }
   }, [ready, direction, setPending])
 
@@ -271,11 +318,36 @@ function Scan({ settings, direction, setPending, onDone }) {
             </span>
           )}
         </div>
+        {punched && (
+          // picagem validada: visto verde bem visível no canto superior direito, além da mensagem
+          <div className="punch-ok" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4.5 12.8l4.8 4.8L19.5 7" />
+            </svg>
+          </div>
+        )}
         <ScanClock />
-        <div className={`banner ${banner.kind}`}>
-          <div className="banner-main">{error || loading || banner.text}</div>
-          {banner.sub && !loading && <div className="banner-sub">{banner.sub}</div>}
-        </div>
+        {choice ? (
+          <div className="pick-overlay">
+            <div className="pick-title">{t('kiosk.alreadyToday', { name: choice.name, type: t(DIRS[choice.dup].label) })}</div>
+            <div className="pick-buttons">
+              {choice.options.map((d) => (
+                <button key={d} type="button" className={`choice-btn ${DIRS[d].cls}`} onClick={() => pick(d)}>
+                  <span className="choice-icons">
+                    {(d === 'meal_out' || d === 'meal_in') && <IconMeal size={36} />}
+                    {d === 'in' || d === 'meal_in' ? <IconIn size={36} /> : <IconOut size={36} />}
+                  </span>
+                  <span>{t(DIRS[d].label)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className={`banner ${banner.kind}`}>
+            <div className="banner-main">{error || loading || banner.text}</div>
+            {banner.sub && !loading && <div className="banner-sub">{banner.sub}</div>}
+          </div>
+        )}
         {debug && (
           <div className="debug" onClick={() => setDebug(null)}>
             {backendName()} {debug.detMs} ms · {debug.status} · n {debug.frames ?? 0}/{debug.of ?? '-'} · sim {debug.similarity?.toFixed(2) ?? '-'} (2º {debug.second?.toFixed(2) ?? '-'}) · real {debug.real?.toFixed(2) ?? '-'} · live {debug.live?.toFixed(2) ?? '-'}

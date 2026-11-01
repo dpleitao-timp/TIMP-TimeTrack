@@ -6,6 +6,8 @@
 //   Tablet  ── qualquer pedido autenticado ──►  [devices.last_seen]  ◄── GET /devices-status ──  Supabase (função relay-status da intranet)
 //   Tablet  ── POST /biometrics ──►  [bio_outbox]  ◄── GET /pull-bio, POST /ack-bio ──  Supabase   (biometria cifrada pelos tablets)
 //   Tablet  ◄── POST /bio-fetch ──  [bio_store]  ◄── POST /bio-store ──  Supabase
+//   Tablet  ── POST /bio-delete ──►  [bio_del_outbox]  ◄── GET /pull-bio-deletions, POST /ack-bio-deletions ──  Supabase   (apagar biometria)
+//   Tablet  ◄── POST /bio-deleted ──  [bio_tombstones]  ◄── POST /bio-tombstones ──  Supabase
 //
 // O tablet escreve picagens (e pedidos para as apagar) e lê a lista de trabalhadores (token do dispositivo). O Supabase lê as picagens,
 // confirma-as e publica a lista (pedidos assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
@@ -478,11 +480,138 @@ async function handleBioFetch(request, env) {
   return json({ items: results.map((x) => ({ sageId: x.sage_id, engine: x.engine, blob: x.blob, updatedAt: x.updated_at })) }, 200, cors)
 }
 
+// ------------------------------------------------------------------ apagar biometria
+// Um tablet apaga um trabalhador e isso tem de chegar a todos os tablets e ao Supabase. O pedido é uma "lápide" cifrada pelo
+// tablet com a chave da frota (o relay e o Supabase não a leem; os tablets só obedecem às que abrem). Mesmo caminho das picagens:
+//   tablet ── POST /bio-delete ──► [bio_del_outbox] ◄── GET /pull-bio-deletions, POST /ack-bio-deletions ── Supabase
+//   tablet ◄── POST /bio-deleted ── [bio_tombstones] ◄── POST /bio-tombstones ── Supabase (de 6 em 6 horas)
+// Ao receber o pedido o relay tira logo a biometria (já feita antes do apagar) do que ainda não saiu, e regista a lápide já.
+const MAX_DEL_BLOB = 4000
+const MAX_TOMBSTONES = 3000
+
+const delItemValid = (i) =>
+  typeof i?.sageId === 'string' && i.sageId.trim() !== '' && i.sageId.trim().length <= 32 &&
+  typeof i?.blob === 'string' && i.blob.length >= 16 && i.blob.length <= MAX_DEL_BLOB &&
+  Number.isFinite(i?.deletedAt)
+
+// Tablet → relay. Corpo: { deviceId, items: [{ sageId, blob, deletedAt }] }. Devolve accepted/rejected (SAGE IDs).
+async function handleBioDelete(request, env) {
+  const cors = corsHeaders(env)
+  const r = await tabletRequest(request, env)
+  if (r.error) return r.error
+  const items = Array.isArray(r.body?.items) ? r.body.items : []
+  if (!items.length || items.length > MAX_BIO_ITEMS) return json({ error: 'invalid_payload' }, 400, cors)
+  const now = Math.floor(Date.now() / 1000)
+  const stmts = []
+  const accepted = []
+  const rejected = []
+  for (const i of items) {
+    if (!delItemValid(i)) {
+      if (typeof i?.sageId === 'string' && i.sageId.trim()) rejected.push(i.sageId.trim())
+      continue
+    }
+    const id = i.sageId.trim()
+    const at = Math.floor(i.deletedAt)
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO bio_del_outbox (sage_id, device_id, blob, blob_hash, deleted_at, received_at) VALUES (?, ?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(sage_id) DO UPDATE SET device_id = excluded.device_id, blob = excluded.blob, blob_hash = excluded.blob_hash, deleted_at = excluded.deleted_at, received_at = excluded.received_at WHERE excluded.deleted_at >= bio_del_outbox.deleted_at',
+      ).bind(id, r.deviceId, i.blob, await sha256Hex(i.blob), at, now),
+      env.DB.prepare('DELETE FROM bio_outbox WHERE sage_id = ? AND updated_at <= ?').bind(id, at),
+      env.DB.prepare('DELETE FROM bio_store WHERE sage_id = ? AND updated_at <= ?').bind(id, at),
+      env.DB.prepare(
+        'INSERT INTO bio_tombstones (sage_id, blob, deleted_at, gen, received_at) VALUES (?, ?, ?, 0, ?) ' +
+          'ON CONFLICT(sage_id) DO UPDATE SET blob = excluded.blob, deleted_at = excluded.deleted_at, received_at = excluded.received_at WHERE excluded.deleted_at >= bio_tombstones.deleted_at',
+      ).bind(id, i.blob, at, now),
+    )
+    accepted.push(id)
+  }
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ accepted, rejected }, 200, cors)
+}
+
+// Supabase lê os pedidos de apagar.
+async function handlePullBioDeletions(request, url, env) {
+  if (!(await verifySignature(request, url, '', env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '50', 10) || 50, 1), MAX_PULL)
+  const { results } = await env.DB.prepare('SELECT sage_id, device_id, blob, blob_hash, deleted_at FROM bio_del_outbox ORDER BY received_at LIMIT ?').bind(limit).all()
+  return json({ items: results.map((x) => ({ sageId: x.sage_id, deviceId: x.device_id, blob: x.blob, hash: x.blob_hash, deletedAt: x.deleted_at })) })
+}
+
+// Supabase confirma o que aplicou (com o hash: um pedido mais recente do mesmo trabalhador fica para a próxima).
+async function handleAckBioDeletions(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let items
+  try {
+    items = JSON.parse(text)?.items
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  if (!Array.isArray(items) || items.length > MAX_ACK || items.some((i) => typeof i?.sageId !== 'string' || typeof i?.hash !== 'string')) return json({ error: 'invalid_payload' }, 400)
+  const stmts = items.map((i) => env.DB.prepare('DELETE FROM bio_del_outbox WHERE sage_id = ? AND blob_hash = ?').bind(i.sageId, i.hash))
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ deleted: items.length })
+}
+
+// Supabase publica as lápides para os tablets. Corpo: { gen, final, items: [{ sageId, blob, deletedAt }] }.
+async function handleBioTombstones(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  const gen = body?.gen
+  const items = body?.items
+  if (!Number.isSafeInteger(gen) || gen <= 0 || !Array.isArray(items) || items.length > 500) return json({ error: 'invalid_payload' }, 400)
+  const now = Math.floor(Date.now() / 1000)
+  const stmts = []
+  let rejected = 0
+  for (const i of items) {
+    if (!delItemValid(i)) {
+      rejected++
+      continue
+    }
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO bio_tombstones (sage_id, blob, deleted_at, gen, received_at) VALUES (?, ?, ?, ?, ?) ' +
+          'ON CONFLICT(sage_id) DO UPDATE SET blob = excluded.blob, deleted_at = excluded.deleted_at, gen = excluded.gen, received_at = excluded.received_at WHERE excluded.deleted_at >= bio_tombstones.deleted_at',
+      ).bind(i.sageId.trim(), i.blob, Math.floor(i.deletedAt), gen, now),
+    )
+  }
+  // no último bloco saem as lápides de envios anteriores (já expiradas no Supabase); as de gen 0 (pedidos ainda não publicados) ficam
+  if (body.final === true) stmts.push(env.DB.prepare('DELETE FROM bio_tombstones WHERE gen <> ? AND gen <> 0').bind(gen))
+  if (stmts.length) await env.DB.batch(stmts)
+  return json({ stored: items.length - rejected, rejected })
+}
+
+// Tablet ← relay. Corpo: { deviceId, since? }. Devolve todas as lápides, ou só { unchanged: true } se nada mudou desde `since`.
+async function handleBioDeleted(request, env) {
+  const cors = corsHeaders(env)
+  const r = await tabletRequest(request, env)
+  if (r.error) return r.error
+  const head = await env.DB.prepare('SELECT COUNT(*) AS n, COALESCE(MAX(gen), 0) AS g, COALESCE(MAX(received_at), 0) AS r FROM bio_tombstones').first()
+  const version = `${head.g}.${head.n}.${head.r}`
+  if (r.body?.since === version) return json({ unchanged: true, version }, 200, cors)
+  const { results } = await env.DB.prepare('SELECT sage_id, blob, deleted_at FROM bio_tombstones ORDER BY deleted_at LIMIT ?').bind(MAX_TOMBSTONES).all()
+  return json({ version, items: results.map((x) => ({ sageId: x.sage_id, blob: x.blob, deletedAt: x.deleted_at })) }, 200, cors)
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (request.method === 'OPTIONS' && ['/punch', '/punch/delete', '/roster', '/biometrics', '/bio-fetch'].includes(url.pathname)) return new Response(null, { status: 204, headers: corsHeaders(env) })
+    if (request.method === 'OPTIONS' && ['/punch', '/punch/delete', '/roster', '/biometrics', '/bio-fetch', '/bio-delete', '/bio-deleted'].includes(url.pathname)) return new Response(null, { status: 204, headers: corsHeaders(env) })
     if (request.method === 'POST' && url.pathname === '/biometrics') return handleBioPost(request, env)
+    if (request.method === 'POST' && url.pathname === '/bio-delete') return handleBioDelete(request, env)
+    if (request.method === 'POST' && url.pathname === '/bio-deleted') return handleBioDeleted(request, env)
+    if (request.method === 'GET' && url.pathname === '/pull-bio-deletions') return handlePullBioDeletions(request, url, env)
+    if (request.method === 'POST' && url.pathname === '/ack-bio-deletions') return handleAckBioDeletions(request, url, env)
+    if (request.method === 'POST' && url.pathname === '/bio-tombstones') return handleBioTombstones(request, url, env)
     if (request.method === 'POST' && url.pathname === '/bio-fetch') return handleBioFetch(request, env)
     if (request.method === 'GET' && url.pathname === '/pull-bio') return handlePullBio(request, url, env)
     if (request.method === 'POST' && url.pathname === '/ack-bio') return handleAckBio(request, url, env)

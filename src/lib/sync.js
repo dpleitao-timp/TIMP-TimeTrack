@@ -1,6 +1,6 @@
 import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta } from './db.js'
 import { isCloudConfigured } from './settings.js'
-import { flushBiometrics } from './bio.js'
+import { flushBiometrics, flushBioDeletions } from './bio.js'
 
 const BATCH = 50
 let running = false
@@ -118,7 +118,8 @@ export async function syncRoster(settings, { force = false } = {}) {
 export function startAutoSync(getSettings, onResult) {
   const run = async () => {
     onResult?.(await flushQueue(getSettings()))
-    flushBiometrics(getSettings()) // a biometria nova segue pelo mesmo caminho (só se houver chave da frota e algo por enviar)
+    // a biometria nova e os apagamentos seguem pelo mesmo caminho (só se houver chave da frota e algo por enviar); apagar primeiro
+    flushBioDeletions(getSettings()).then(() => flushBiometrics(getSettings()))
   }
   const timer = setInterval(run, 20000)
   window.addEventListener('online', run)

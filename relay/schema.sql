@@ -60,3 +60,25 @@ CREATE TABLE IF NOT EXISTS bio_store (
   gen        INTEGER NOT NULL,               -- instante do envio; os registos de envios antigos são apagados no fim
   PRIMARY KEY (sage_id, engine)
 );
+
+-- Apagar biometria (um tablet apaga um trabalhador: tem de desaparecer de todos os tablets e do Supabase).
+-- Cada pedido é uma "lápide" CIFRADA pelo tablet com a chave da frota (o relay não a lê; os tablets só obedecem às que abrem).
+-- bio_del_outbox: pedidos dos tablets que o Supabase ainda não leu (confirma com o hash do blob).
+CREATE TABLE IF NOT EXISTS bio_del_outbox (
+  sage_id     TEXT PRIMARY KEY,
+  device_id   TEXT NOT NULL,
+  blob        TEXT NOT NULL,                 -- lápide cifrada
+  blob_hash   TEXT NOT NULL,
+  deleted_at  INTEGER NOT NULL,              -- quando o tablet apagou (ms)
+  received_at INTEGER NOT NULL
+);
+
+-- bio_tombstones: as lápides que os tablets vão buscar. Entram logo que o tablet avisa (gen = 0) e o Supabase volta a
+-- publicá-las de 6 em 6 horas (gen = instante do envio; as de envios antigos saem no fim, as de gen 0 ficam).
+CREATE TABLE IF NOT EXISTS bio_tombstones (
+  sage_id     TEXT PRIMARY KEY,
+  blob        TEXT NOT NULL,
+  deleted_at  INTEGER NOT NULL,
+  gen         INTEGER NOT NULL,
+  received_at INTEGER NOT NULL
+);

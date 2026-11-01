@@ -139,6 +139,49 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: 'pull_failed', detail: String((e as Error)?.message ?? e).slice(0, 300), stored, dropped, removed }), { status: 502 })
   }
 
+  // Pedidos de apagar biometria (migração 011): um tablet apagou um trabalhador. Aplicam-se ANTES de gravar biometria nova.
+  // Cada pedido é uma lápide cifrada com a chave da frota: o Supabase não a lê, só valida o envelope e guarda-a.
+  // Num bloco à parte: se falhar, as picagens já gravadas ficam como estão e o erro só aparece em `bioDelError`.
+  const bioDel = { deleted: 0, tombstones: 0, dropped: 0 }
+  let bioDelError: string | undefined
+  try {
+    for (let i = 0; i < MAX_BIO_BATCHES; i++) {
+      const { items } = await signedFetch('/pull-bio-deletions?limit=50', 'GET')
+      if (!items?.length) break
+      const rows: Record<string, unknown>[] = []
+      const ack: { sageId: string; hash: string }[] = []
+      for (const it of items) {
+        if (typeof it?.sageId !== 'string' || typeof it?.hash !== 'string') continue
+        ack.push({ sageId: it.sageId, hash: it.hash }) // inválidos também se confirmam, para saírem do relay
+        const valid =
+          it.sageId.trim() !== '' &&
+          it.sageId.length <= 32 &&
+          typeof it.blob === 'string' &&
+          it.blob.length >= 16 &&
+          it.blob.length <= 4000 &&
+          typeof it.deviceId === 'string' &&
+          Number.isFinite(it.deletedAt) &&
+          (await sha256Hex(it.blob)) === it.hash
+        if (!valid) {
+          bioDel.dropped++
+          continue
+        }
+        rows.push({ sage_id: it.sageId.trim(), blob: it.blob, blob_hash: it.hash, deleted_at_ms: it.deletedAt, device_id: it.deviceId })
+      }
+      if (rows.length) {
+        const { data, error } = await supabase.rpc('timetrack_delete_biometrics', { p_items: rows })
+        if (error) throw new Error(`biometric deletions: ${error.message}`)
+        bioDel.deleted += data?.deleted ?? 0
+        bioDel.tombstones += data?.tombstones ?? 0
+      }
+      await signedFetch('/ack-bio-deletions', 'POST', JSON.stringify({ items: ack }))
+      if (items.length < 50) break
+    }
+  } catch (e) {
+    console.error(e)
+    bioDelError = String((e as Error)?.message ?? e).slice(0, 300)
+  }
+
   // Biometria cifrada pelos tablets (migração 009). Num bloco à parte: se falhar, as picagens já gravadas e confirmadas
   // ficam como estão e o erro só aparece em `bioError`; a biometria fica no relay e tenta-se na próxima execução.
   // O Supabase não decifra nada: só valida o envelope, grava o blob tal como veio e confirma.
@@ -184,5 +227,5 @@ Deno.serve(async (req) => {
     bioError = String((e as Error)?.message ?? e).slice(0, 300)
   }
 
-  return new Response(JSON.stringify({ stored, dropped, removed, bio, bioError }), { headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify({ stored, dropped, removed, bio, bioError, bioDel, bioDelError }), { headers: { 'Content-Type': 'application/json' } })
 })

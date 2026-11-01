@@ -93,7 +93,7 @@ export default function Settings({ settings, onChange }) {
     if (!isBioConfigured(cfg)) return setBioMsg(t('settings.bioNoKey'))
     setBioMsg(t('settings.bioWorking'))
     const r = await syncBiometrics(cfg)
-    setBioMsg(r.error ? t('settings.bioError', { err: r.error }) : t(r.failed ? 'settings.bioResultFailed' : 'settings.bioResult', { sent: r.sent, received: r.received, failed: r.failed }))
+    setBioMsg(r.error ? t('settings.bioError', { err: r.error }) : t(r.failed ? 'settings.bioResultFailed' : 'settings.bioResult', { sent: r.sent ?? 0, received: r.received ?? 0, failed: r.failed ?? 0, deleted: r.deleted ?? 0 }))
     if (r.received) window.dispatchEvent(new Event('roster-updated'))
   }
 

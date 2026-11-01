@@ -7,8 +7,9 @@
 // Regras acordadas com o utilizador:
 //  - o perfil de Administrador NÃO viaja: a biometria recebida entra sempre como utilizador normal;
 //  - só se recebe o que falta: um registo local utilizável (motor atual) nunca é substituído pelo do relay;
+//  - apagar um trabalhador num tablet apaga-o em todos os tablets e no Supabase (lápides cifradas, ver mais abaixo);
 //  - os vetores de um motor/modelo não servem noutro: só se recebe o do motor atual.
-import { listUnsentWorkers, markBioSent, listWorkerHeads, listWorkers, listRoster, saveWorker } from './db.js'
+import { listUnsentWorkers, markBioSent, listWorkerHeads, listWorkers, listRoster, saveWorker, deleteWorker, getBioDeletionQueue, clearBioDeletions, getBioTombs, saveBioTombs } from './db.js'
 import { engineTag, isBioConfigured } from './settings.js'
 
 const enc = new TextEncoder()
@@ -73,6 +74,33 @@ export async function openBio(blob, sageId, engine, pass) {
   }
 }
 
+// ---- lápides (apagar biometria em todos os tablets)
+// Quando um tablet apaga um trabalhador, envia uma lápide cifrada com a chave da frota ({ sageId, deletedAt }). O relay e o Supabase
+// guardam-na e apagam a biometria que têm; os outros tablets só obedecem às lápides que abrem (quem não tem a chave não consegue
+// forjar apagamentos). Uma lápide só apaga o que foi registado ANTES dela: quem refaz a biometria depois não é afetado.
+export async function sealDeletion({ sageId, deletedAt }, pass) {
+  const key = await fleetKey(pass)
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const plain = enc.encode(JSON.stringify({ v: 1, kind: 'del', sageId, deletedAt }))
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(sageId, 'del') }, key, plain)
+  return JSON.stringify({ v: 1, iv: toB64(iv), data: toB64(new Uint8Array(data)) })
+}
+
+// Devolve { deletedAt } ou null (chave errada, adulterada, ou de outro trabalhador).
+export async function openDeletion(blob, sageId, pass) {
+  try {
+    const key = await fleetKey(pass)
+    const env = JSON.parse(blob)
+    if (env?.v !== 1) return null
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(env.iv), additionalData: aad(sageId, 'del') }, key, fromB64(env.data))
+    const p = JSON.parse(new TextDecoder().decode(plain))
+    if (p?.v !== 1 || p.kind !== 'del' || p.sageId !== sageId || !Number.isFinite(p.deletedAt)) return null
+    return { deletedAt: p.deletedAt }
+  } catch {
+    return null
+  }
+}
+
 // ---- tablet → relay
 const relay = (settings) => settings.relayUrl.replace(/\/$/, '')
 const post = (settings, path, body) =>
@@ -122,7 +150,74 @@ export async function flushBiometrics(settings) {
   }
 }
 
+let sendingDel = false
+// Envia ao relay os apagamentos por enviar. Fica na fila até o relay os aceitar (por isso funciona sem rede e depois da chave).
+// Devolve { sentDeletions, error? }.
+export async function flushBioDeletions(settings) {
+  if (sendingDel || !isBioConfigured(settings) || !navigator.onLine) return { sentDeletions: 0 }
+  sendingDel = true
+  let sentDeletions = 0
+  try {
+    const queue = await getBioDeletionQueue()
+    for (let i = 0; i < queue.length; i += 50) {
+      const part = queue.slice(i, i + 50)
+      const items = await Promise.all(part.map(async (q) => ({ sageId: q.sageId, deletedAt: q.at, blob: await sealDeletion({ sageId: q.sageId, deletedAt: q.at }, settings.bioKey) })))
+      const res = await post(settings, '/bio-delete', { deviceId: settings.deviceId, items })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const out = await res.json()
+      const done = new Set([...(out.accepted ?? []), ...(out.rejected ?? [])]) // os recusados são inválidos: não se repetem
+      await clearBioDeletions(part.filter((q) => done.has(q.sageId)))
+      sentDeletions += part.filter((q) => (out.accepted ?? []).includes(q.sageId)).length
+    }
+    return { sentDeletions }
+  } catch (e) {
+    return { sentDeletions, error: String(e?.message || e) }
+  } finally {
+    sendingDel = false
+  }
+}
+
 // ---- relay → tablet
+// Vai buscar as lápides e apaga aqui os trabalhadores apagados noutros tablets (só os registados antes do apagar; nunca apaga o
+// único Administrador utilizável, para o tablet não ficar com a administração aberta). Devolve { deleted, kept, failed, error? };
+// failed = lápides que não abrem (chave da frota diferente) e por isso se ignoram.
+export async function applyBioTombstones(settings) {
+  if (!isBioConfigured(settings) || !navigator.onLine) return { deleted: 0, kept: 0, failed: 0 }
+  let deleted = 0
+  let kept = 0
+  let failed = 0
+  try {
+    const saved = await getBioTombs()
+    const res = await post(settings, '/bio-deleted', { deviceId: settings.deviceId, since: saved.version })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const out = await res.json()
+    if (out.unchanged) return { deleted, kept, failed }
+    const map = { ...saved.map }
+    const heads = new Map((await listWorkerHeads()).map((w) => [w.id, w]))
+    for (const it of out.items ?? []) {
+      const d = await openDeletion(it.blob, it.sageId, settings.bioKey)
+      if (!d) {
+        failed++
+        continue
+      }
+      map[it.sageId] = Math.max(map[it.sageId] ?? 0, d.deletedAt)
+      const local = heads.get(it.sageId)
+      if (!local || (local.rev ?? local.createdAt ?? 0) > d.deletedAt) continue // não há, ou foi refeito depois do apagar
+      try {
+        await deleteWorker(it.sageId, { propagate: false })
+        deleted++
+      } catch {
+        kept++ // único Administrador utilizável: fica
+      }
+    }
+    // com lápides que não abriram não se guarda a versão: volta a pedir-se quando a chave estiver certa
+    await saveBioTombs(map, failed ? saved.version : out.version)
+    return { deleted, kept, failed }
+  } catch (e) {
+    return { deleted, kept, failed, error: String(e?.message || e) }
+  }
+}
+
 let lastTry = { at: 0, key: '' }
 // Vai buscar ao relay a biometria dos trabalhadores da obra do tablet que ainda não a têm (ou que só a têm de outro motor).
 // Devolve { received, failed, error? }; failed = chegaram blobs que não abrem (chave da frota diferente, ou adulterados).
@@ -142,6 +237,7 @@ export async function fetchMissingBiometrics(settings, { force = false } = {}) {
     lastTry = { at: Date.now(), key }
 
     const roster = new Map((await listRoster()).map((r) => [r.sageId, r.name]))
+    const tombs = (await getBioTombs()).map
     for (let i = 0; i < need.length; i += FETCH_IDS) {
       const ids = need.slice(i, i + FETCH_IDS)
       const res = await post(settings, '/bio-fetch', { deviceId: settings.deviceId, engine: tag, obra, ids })
@@ -153,6 +249,7 @@ export async function fetchMissingBiometrics(settings, { force = false } = {}) {
         if (!ids.includes(it.sageId) || it.engine !== tag) continue
         const local = now.get(it.sageId)
         if (local && !local.stale && !local.broken) continue
+        if ((tombs[it.sageId] ?? 0) >= it.updatedAt) continue // foi apagado noutro tablet depois de esta biometria ser registada
         const bio = await openBio(it.blob, it.sageId, it.engine, settings.bioKey)
         if (!bio) {
           failed++
@@ -176,9 +273,11 @@ export async function fetchMissingBiometrics(settings, { force = false } = {}) {
   }
 }
 
-// Envia e recebe, já. Usado pelo botão das Definições.
+// Envia e recebe, já (apagamentos primeiro, para não se voltar a receber o que acabou de ser apagado). Botão das Definições.
 export async function syncBiometrics(settings) {
+  const delUp = await flushBioDeletions(settings)
+  const delDown = await applyBioTombstones(settings)
   const up = await flushBiometrics(settings)
   const down = await fetchMissingBiometrics(settings, { force: true })
-  return { ...up, ...down, error: up.error || down.error }
+  return { ...up, ...down, deleted: delDown.deleted, kept: delDown.kept, sentDeletions: delUp.sentDeletions, error: delUp.error || delDown.error || up.error || down.error }
 }

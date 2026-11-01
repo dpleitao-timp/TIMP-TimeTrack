@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { getClockOffset } from '../lib/db.js'
 import { fmtDateTime } from '../lib/date.js'
 
-// Data e hora no canto inferior esquerdo (ecrã de leitura e ecrã de repouso). Usa a hora corrigida pelo servidor (a mesma que
+// Data e hora (ecrã de leitura e ecrã de repouso: canto inferior esquerdo; ecrã inicial: canto inferior direito, ver className). Usa a hora corrigida pelo servidor (a mesma que
 // se grava na picagem). É um span para poder ficar dentro do botão do ecrã de repouso.
-export default function ScanClock() {
+export default function ScanClock({ className = '' }) {
   const [now, setNow] = useState(() => Date.now())
   const offset = useRef(0)
   useEffect(() => {
@@ -18,5 +18,5 @@ export default function ScanClock() {
       clearInterval(timer)
     }
   }, [])
-  return <span className="scan-clock">{fmtDateTime(now)}</span>
+  return <span className={`scan-clock ${className}`}>{fmtDateTime(now)}</span>
 }

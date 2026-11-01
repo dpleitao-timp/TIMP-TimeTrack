@@ -120,7 +120,50 @@ Deno.serve(async (req) => {
       bioError = String((e as Error)?.message ?? e).slice(0, 300)
     }
 
-    return new Response(JSON.stringify({ sent: rows.length, stored, rejected, bio, bioError }), { headers: { 'Content-Type': 'application/json' } })
+    // Lápides de apagar biometria (migração 011): dizem aos tablets que ainda têm o trabalhador que o apaguem. Só as dos últimos 365 dias.
+    // Num bloco à parte; se a leitura falhar não se publica nada (para não esvaziar as lápides do relay por engano).
+    const tomb = { sent: 0, stored: 0, rejected: 0 }
+    let tombError: string | undefined
+    try {
+      const since = new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString()
+      const all: { sageId: string; blob: string; deletedAt: number }[] = []
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('timetrack_biometric_deletions')
+          .select('sage_id, blob, deleted_at')
+          .gte('deleted_at', since)
+          .order('sage_id')
+          .range(from, from + PAGE - 1)
+        if (error) throw new Error(`deletions: ${error.message}`)
+        for (const d of data) all.push({ sageId: String(d.sage_id), blob: d.blob, deletedAt: Date.parse(d.deleted_at) })
+        if (data.length < PAGE) break
+      }
+      const tgen = Date.now()
+      const tblocks: (typeof all)[] = []
+      let tcur: typeof all = []
+      let tchars = 0
+      for (const d of all) {
+        if (tcur.length && (tcur.length >= 100 || tchars + d.blob.length > BIO_CHUNK_CHARS)) {
+          tblocks.push(tcur)
+          tcur = []
+          tchars = 0
+        }
+        tcur.push(d)
+        tchars += d.blob.length
+      }
+      tblocks.push(tcur) // o último pode ser vazio: já não há lápides válidas, o relay esvazia as publicadas
+      for (let i = 0; i < tblocks.length; i++) {
+        const out = await signedPost('/bio-tombstones', JSON.stringify({ gen: tgen, final: i === tblocks.length - 1, items: tblocks[i] }))
+        tomb.stored += out.stored ?? 0
+        tomb.rejected += out.rejected ?? 0
+      }
+      tomb.sent = all.length
+    } catch (e) {
+      console.error(e)
+      tombError = String((e as Error)?.message ?? e).slice(0, 300)
+    }
+
+    return new Response(JSON.stringify({ sent: rows.length, stored, rejected, bio, bioError, tomb, tombError }), { headers: { 'Content-Type': 'application/json' } })
   } catch (e) {
     console.error(e)
     return new Response(JSON.stringify({ error: 'publish_failed', detail: String((e as Error)?.message ?? e).slice(0, 300) }), { status: 502 })

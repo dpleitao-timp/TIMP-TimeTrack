@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { initHuman, detect, backendName } from '../lib/face.js'
 import { createRecognizer } from '../lib/recognizer.js'
 import { useModelsReady } from '../lib/useModels.js'
-import { listWorkers, enqueuePunch, punchStatus } from '../lib/db.js'
+import { listWorkers, enqueuePunch, punchStatus, listRoster, rosterMeta } from '../lib/db.js'
 import { flushQueue } from '../lib/sync.js'
 import { bumpStat, missingFields } from '../lib/settings.js'
 import { useCamera } from '../lib/useCamera.js'
 import { diagStart, diagPush, videoInfo, faceNoise } from '../lib/diag.js'
 import { createLightControl, setFrameVars } from '../lib/lightframe.js'
-import { BAD_SHOW_MS, isAlive, allowedDirections } from '../lib/scanrules.js'
+import { BAD_SHOW_MS, isAlive, allowedDirections, sameObra } from '../lib/scanrules.js'
 import { useT } from '../lib/i18n.jsx'
 import AdminLogin from './AdminLogin.jsx'
 import Setup, { SETUP_ID } from './Setup.jsx'
@@ -159,8 +159,16 @@ function Scan({ settings, direction, onDone }) {
   const recordRef = useRef(null)
   const choiceTimer = useRef(null)
 
+  // Relógio que serve várias obras: na SAÍDA, quem pode trabalhar em mais de uma obra escolhe aquela em que trabalhou (só as que tem autorizadas hoje).
+  // Quem só tem uma obra não vê a escolha. `obraChoice` mostra a pergunta; `pendingObra` guarda quem foi reconhecido enquanto se escolhe.
+  const [obraChoice, setObraChoice] = useState(null) // null | { name, obras }
+  const [pickedObra, setPickedObra] = useState(null)
+  const pendingObra = useRef(null)
+  const commitRef = useRef(null)
+  const obraTimer = useRef(null)
+
   const shownDirection = picked ?? direction
-  const punched = banner.kind === 'ok' && !choice // a picagem acabou de ser validada
+  const punched = banner.kind === 'ok' && !choice && !obraChoice // a picagem acabou de ser validada
   const dir = DIRS[shownDirection] ?? DIRS.in
   const isMeal = shownDirection === 'meal_out' || shownDirection === 'meal_in'
   const isArrival = shownDirection === 'in' || shownDirection === 'meal_in' // entrada (da obra ou do almoço/jantar)
@@ -173,6 +181,16 @@ function Scan({ settings, direction, onDone }) {
     setChoice(null)
     setPicked(d)
     await recordRef.current?.(d, p.worker, p.r)
+  }
+
+  const pickObra = async (o) => {
+    clearTimeout(obraTimer.current)
+    const p = pendingObra.current
+    if (!p) return
+    pendingObra.current = null
+    setObraChoice(null)
+    setPickedObra(o)
+    await commitRef.current?.(p.d, p.worker, p.r, o, { release: true })
   }
 
   useEffect(() => {
@@ -192,6 +210,15 @@ function Scan({ settings, direction, onDone }) {
       if (stop) return
       setLoading('')
       workers = await listWorkers()
+      // Relógio que serve várias obras (o relay deu-lhe obras extra): a lista traz as obras autorizadas hoje de cada trabalhador.
+      // Um relógio de uma só obra (ou sem lista ainda) funciona como sempre.
+      const [meta, roster] = await Promise.all([rosterMeta(), listRoster()])
+      const multi = meta.obras.length > 1
+      const rosterById = new Map(roster.map((w) => [w.sageId, w]))
+      const obrasOf = (id) => {
+        const o = rosterById.get(String(id))?.obras
+        return o?.length ? o : [settingsRef.current.obra.trim()] // fora da lista: a obra do relógio, como antes
+      }
       recognizer = createRecognizer(() => settingsRef.current, workers)
       diagStart() // um registo novo por cada leitura (o último fica disponível nas Definições)
       // topo e base seguem a espessura calculada; as laterais, que têm muito espaço num ecrã largo, crescem mais
@@ -200,32 +227,54 @@ function Scan({ settings, direction, onDone }) {
       light = createLightControl((v) => setFrameVars(kioskRef.current, v, autoFrame), autoFrame)
       if (!workers.some((w) => !w.stale && !w.broken)) show({ kind: 'warn', text: workers.length ? t('kiosk.staleWorkers') : t('kiosk.noWorkers') })
 
-      // Grava a picagem do tipo `d` para `worker` (r = a leitura do reconhecedor que o identificou) e mostra a confirmação.
-      const record = async (d, worker, r) => {
+      // Grava a picagem do tipo `d` para `worker` (r = a leitura do reconhecedor que o identificou) na obra `obra` e mostra a confirmação.
+      // hold: fica retida no tablet até à saída; release: é a saída, e solta as retidas do dia com esta obra.
+      const commit = async (d, worker, r, obra, { hold = false, release = false } = {}) => {
         const s = settingsRef.current
         const ms = Math.round(performance.now() - r.start)
         const punch = await enqueuePunch({
           deviceId: s.deviceId,
           direction: d,
-          obra: s.obra.trim(),
+          obra,
           sageId: worker.id,
           workerName: worker.name,
           confidence: r.similarity,
           second: r.hasSecond ? r.second : null, // o 2º mais parecido e os valores do anti-foto: só para afinar o sistema
           real: r.real,
           live: r.live,
+          hold,
+          release,
         })
         bumpStat('punches', ms)
         show({
           kind: 'ok',
           text: t('kiosk.hello', { name: worker.name }),
-          sub: `${t((DIRS[d] ?? DIRS.in).label)} ${fmtTime(punch.punchedAt, locale)}`,
+          // com várias obras mostra-se a obra da picagem final (as retidas ainda não a têm)
+          sub: `${t((DIRS[d] ?? DIRS.in).label)} ${fmtTime(punch.punchedAt, locale)}${multi && !hold ? ` · ${obra}` : ''}`,
         })
         flushQueue(s) // o contador do cabeçalho acompanha a fila sozinho (evento queue-changed)
         recognizer.reset()
         pauseUntil = performance.now() + 3500
         // registado: a câmara desliga e volta ao ecrã de escolha
         timers.push(setTimeout(() => onDoneRef.current(), 3500))
+      }
+      commitRef.current = commit
+
+      // Decide como se grava: num relógio de várias obras, quem tem mais de uma obra autorizada hoje fica com a picagem retida até à saída, e na
+      // saída escolhe a obra. Quem só tem uma obra (por exemplo, a do relógio) não escolhe nada e a picagem segue logo para o relay.
+      const record = async (d, worker, r) => {
+        const s = settingsRef.current
+        const obras = multi ? obrasOf(worker.id) : [s.obra.trim()]
+        if (obras.length < 2) return commit(d, worker, r, obras[0], { release: multi && d === 'out' })
+        if (d !== 'out') {
+          // provisoriamente na obra do relógio (se está autorizado nela, senão na primeira); a obra final fica a da saída
+          return commit(d, worker, r, obras.find((o) => sameObra(o, s.obra)) ?? obras[0], { hold: true })
+        }
+        recognizer.reset()
+        pendingObra.current = { d, worker, r }
+        pauseUntil = performance.now() + CHOICE_MS + 2000 // o reconhecimento fica parado enquanto se escolhe
+        setObraChoice({ name: worker.name, obras })
+        obraTimer.current = setTimeout(() => onDoneRef.current(), CHOICE_MS) // sem escolher, volta ao ecrã inicial e nada é gravado
       }
       recordRef.current = record
 
@@ -320,6 +369,7 @@ function Scan({ settings, direction, onDone }) {
       stop = true
       timers.forEach(clearTimeout)
       clearTimeout(choiceTimer.current)
+      clearTimeout(obraTimer.current)
     }
   }, [ready, direction])
 
@@ -334,9 +384,9 @@ function Scan({ settings, direction, onDone }) {
             {isMeal && !isArrival && <IconMeal size={26} />}
             {t(dir.label).toLocaleUpperCase(locale)}
           </span>
-          {settings.obra?.trim() && (
+          {(pickedObra || settings.obra?.trim()) && (
             <span className="obra-pill" title={t('kiosk.obraLabel')}>
-              {t('kiosk.obraLabel')} <strong>{settings.obra.trim()}</strong>
+              {t('kiosk.obraLabel')} <strong>{pickedObra || settings.obra.trim()}</strong>
             </span>
           )}
         </div>
@@ -349,7 +399,18 @@ function Scan({ settings, direction, onDone }) {
           </div>
         )}
         <ScanClock />
-        {choice ? (
+        {obraChoice ? (
+          <div className="pick-overlay">
+            <div className="pick-title">{t('kiosk.whichObra', { name: obraChoice.name })}</div>
+            <div className="pick-obras">
+              {obraChoice.obras.map((o) => (
+                <button key={o} type="button" className="obra-btn" onClick={() => pickObra(o)}>
+                  {o}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : choice ? (
           <div className="pick-overlay">
             <div className="pick-title">{t('kiosk.alreadyToday', { name: choice.name, type: t(DIRS[choice.dup].label) })}</div>
             <div className="pick-buttons">

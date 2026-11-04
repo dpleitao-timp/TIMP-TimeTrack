@@ -29,9 +29,12 @@ export default function Settings({ settings, onChange }) {
   }, [])
   const [theme, setThemeState] = useState(getTheme())
   const [cameras, setCameras] = useState([])
-  const [roster, setRoster] = useState({ n: 0, at: 0 })
+  const [roster, setRoster] = useState({ n: 0, at: 0, obras: [] })
   const [rosterMsg, setRosterMsg] = useState('')
-  const loadRoster = async () => setRoster({ n: (await listRoster()).length, at: (await rosterMeta()).at })
+  const loadRoster = async () => {
+    const meta = await rosterMeta()
+    setRoster({ n: (await listRoster()).length, at: meta.at, obras: meta.obras })
+  }
   useEffect(() => {
     loadRoster()
   }, [])
@@ -236,6 +239,7 @@ export default function Settings({ settings, onChange }) {
             <h2>{t('settings.roster')}</h2>
             <p className="muted" style={{ marginTop: 0 }}>{t('settings.rosterHint')}</p>
             <p className="settings-status">{roster.at ? t('settings.rosterStatus', { n: roster.n, date: fmtDateTime(roster.at) }) : t('settings.rosterNone')}</p>
+            {roster.obras.length > 1 && <p className="notice notice-info">{t('settings.rosterObras', { list: roster.obras.join(', ') })}</p>}
             <button type="button" className="btn btn-secondary btn-small" onClick={rosterRefresh}>
               {t('settings.rosterRefresh')}
             </button>

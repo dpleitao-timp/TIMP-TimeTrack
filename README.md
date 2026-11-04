@@ -75,6 +75,12 @@ Supabase ──POST /roster (assinado)──► Relay ◄──GET /roster (assi
 - **Tablet:** sincroniza ao arrancar, a cada 5 min e quando a rede volta; Definições → Lista de trabalhadores mostra quantos e quando, com "Atualizar lista agora". Se o SAGE ID escrito à mão não estiver na lista, aparece um aviso (não bloqueia). Os trabalhadores já registados no tablet que deixaram de estar na lista (saíram da obra ou ainda não entraram) aparecem com a etiqueta "fora da lista da obra" e um resumo por cima, para o Administrador os apagar; é só um aviso, a picagem não é bloqueada.
 - O relay passa a guardar **nomes** (dados pessoais): constar da avaliação de RGPD; só se enviam os trabalhadores ativos e cada tablet lê só os da sua obra.
 
+## Relógio que serve várias obras (por exemplo, o da sede)
+Alguns trabalhadores andam por várias obras. Um relógio pode servir mais de uma: continua com a sua obra fixa (a obra por defeito) e o **relay** dá-lhe obras extra; o tablet nunca as define.
+- **Configurar (relay):** `INSERT INTO device_obras (device_id, obra) VALUES ('dev-sede', 'OBRA-A')` (migração `relay/migrations/010_device_obras.sql`; ou `node relay/scripts/add-device.mjs dev-sede SEDE OBRA-A OBRA-B` ao criar o relógio). Sem linhas na tabela o relógio funciona como sempre. O tablet apanha as obras na leitura da lista (5 min) e Definições → Lista de trabalhadores mostra-as.
+- **Quem pode escolher:** só quem tem duas ou mais obras autorizadas hoje (a atribuição trabalhador-obra com datas, a mesma que alimenta a lista; o Supabase não muda). Quem só tem uma obra pica normalmente e a picagem segue logo para o relay.
+- **Como funciona:** as picagens de quem pode trabalhar em várias obras ficam **retidas no tablet** (🕒 em Picagens) até à **saída**. Na saída, depois de reconhecido, escolhe a obra entre as suas, e todas as picagens retidas desse dia seguem com essa obra. Se se esquecer da saída, **às 00:00 seguem com a obra por defeito**. O relay só aceita as obras do relógio.
+
 ## Versão
 O canto inferior direito mostra `v<versão> · <commit> · <data>` (a versão vem do `package.json`; o `+` depois do commit indica que a compilação tinha alterações por commitar). Serve para confirmar que o tablet já tem a versão publicada.
 

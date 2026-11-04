@@ -2,13 +2,14 @@
 //   RELAY=http://127.0.0.1:8787 DEVICE=dev-test CODE=<código de instalação> SECRET=<PULL_SECRET> node relay/scripts/smoke-test.mjs
 // O dispositivo tem de ter a obra OBRA-TESTE no relay. O teste liga-o com o código de instalação (uso único; depois usa a chave guardada em
 // KEYDIR, ver _device.mjs). Opcionais: DEVICE_NO_OBRA e CODE_NO_OBRA (dispositivo SEM obra); DEVICE_FRESH e CODE_FRESH (por ligar, para
-// testar a ligação); DEVICE_EXPIRED e CODE_EXPIRED (código caducado); DEVICE_REVOKED e CODE_REVOKED (dispositivo revogado).
+// testar a ligação); DEVICE_MULTI e CODE_MULTI (obra OBRA-TESTE e a obra extra OBRA-B em device_obras); DEVICE_EXPIRED e CODE_EXPIRED (código caducado); DEVICE_REVOKED e CODE_REVOKED (dispositivo revogado).
 import { createHmac } from 'node:crypto'
 import { loadClient, enroll, newKeys } from './_device.mjs'
 
-const { RELAY = 'http://127.0.0.1:8787', DEVICE = 'dev-test', CODE, SECRET, DEVICE_NO_OBRA, CODE_NO_OBRA, DEVICE_FRESH, CODE_FRESH, DEVICE_EXPIRED, CODE_EXPIRED, DEVICE_REVOKED, CODE_REVOKED } = process.env
+const { RELAY = 'http://127.0.0.1:8787', DEVICE = 'dev-test', CODE, SECRET, DEVICE_NO_OBRA, CODE_NO_OBRA, DEVICE_FRESH, CODE_FRESH, DEVICE_EXPIRED, CODE_EXPIRED, DEVICE_REVOKED, CODE_REVOKED, DEVICE_MULTI, CODE_MULTI } = process.env
 if (!SECRET) throw new Error('Defina SECRET (e CODE, ou uma chave já guardada em KEYDIR)')
 const dev = await loadClient(RELAY, DEVICE, CODE) // o tablet de teste, ligado ao relay
+const multi = DEVICE_MULTI ? await loadClient(RELAY, DEVICE_MULTI, CODE_MULTI) : null // opcional: relógio com obras extra (OBRA-TESTE por defeito e OBRA-B em device_obras)
 const noObraDev = DEVICE_NO_OBRA ? await loadClient(RELAY, DEVICE_NO_OBRA, CODE_NO_OBRA) : null
 
 let failed = 0
@@ -251,6 +252,54 @@ for (const [method, path] of [['POST', '/biometrics'], ['POST', '/bio-fetch'], [
 for (const [method, path] of [['GET', '/pull-bio'], ['GET', '/pull-bio-deletions']]) {
   r = await signed(method, path)
   check(`${path} já não existe → 404`, r.status === 404, String(r.status))
+}
+
+// Relógio com várias obras (a obra por defeito OBRA-TESTE e a extra OBRA-B, em device_obras): pica nas duas, a lista traz as obras de cada um
+if (multi) {
+  const mid = (n) => `${DEVICE_MULTI}-${String(base + n).padStart(6, '0')}`
+  const mp = (n, over = {}) => punch(base + n, { eventId: mid(n), ...over })
+  const mpost = (body, opts) => multi.req('POST', '/punch', body, opts)
+  r = await mpost({ deviceId: DEVICE_MULTI, punches: [mp(500), mp(501, { obra: 'OBRA-B', direction: 'out' }), mp(502, { obra: ' obra-b ' }), mp(503, { obra: 'OBRA-C' })] })
+  j = await r.json()
+  check('relógio com obras extra: aceita a por defeito e a extra, recusa as outras', r.status === 200 && j.rejected.join() === mid(503) && j.accepted.length === 4, JSON.stringify(j))
+  r = await signed('GET', '/pull?limit=100')
+  j = await r.json()
+  const mobra = (n) => j.punches.find((p) => p.eventId === mid(n))?.obra
+  check('a picagem fica com a obra do relay (a extra, sem depender das maiúsculas)', mobra(500) === 'OBRA-TESTE' && mobra(501) === 'OBRA-B' && mobra(502) === 'OBRA-B' && mobra(503) === undefined, JSON.stringify([500, 501, 502, 503].map(mobra)))
+  await signed('POST', '/ack', JSON.stringify({ eventIds: [mid(500), mid(501), mid(502)] })) // limpeza
+  // o dispositivo de uma só obra continua a não poder picar na extra do outro
+  r = await post({ deviceId: DEVICE, punches: [punch(base + 510, { obra: 'OBRA-B' })] })
+  j = await r.json()
+  check('um dispositivo sem obras extra não pica na obra extra de outro', r.status === 200 && j.rejected.length === 1, JSON.stringify(j))
+
+  const genM = Date.now() + 10
+  const rosterM = [
+    { sageId: 'M1', name: 'Ana Silva', obra: 'OBRA-TESTE', active: true },
+    { sageId: 'M1', name: 'Ana Silva', obra: 'OBRA-B', active: true },
+    { sageId: 'M2', name: 'Bruno Costa', obra: 'OBRA-B', active: true },
+    { sageId: 'M3', name: 'Carla Dias', obra: 'OBRA-B', active: false },
+    { sageId: 'M4', name: 'Diogo Reis', obra: 'OBRA-TESTE', active: true },
+    { sageId: 'M5', name: 'Eva Lima', obra: 'OBRA-C', active: true },
+  ]
+  r = await signed('POST', '/roster', JSON.stringify({ gen: genM, final: true, workers: rosterM }))
+  const getM = (qs = '') => multi.req('GET', `/roster?device=${DEVICE_MULTI}${qs}`)
+  r = await getM()
+  j = await r.json()
+  const byId = Object.fromEntries((j.workers || []).map((w) => [w.sageId, w.obras?.join('|')]))
+  check('relógio com obras extra: lista os ativos das suas obras e as obras de cada um (a por defeito primeiro)', r.status === 200 && JSON.stringify(byId) === JSON.stringify({ M1: 'OBRA-TESTE|OBRA-B', M2: 'OBRA-B', M4: 'OBRA-TESTE' }) && j.obras.join() === 'OBRA-TESTE,OBRA-B', JSON.stringify(j))
+  check('a lista inclui a assinatura do conjunto de obras', typeof j.sig === 'string' && j.sig !== '', JSON.stringify(j.sig))
+  const sigM = j.sig
+  r = await getM(`&since=${j.generatedAt}&set=${encodeURIComponent(sigM)}`)
+  check('sem alterações e com o mesmo conjunto de obras → unchanged', (await r.json()).unchanged === true)
+  r = await getM(`&since=${j.generatedAt}&set=`)
+  j = await r.json()
+  check('com outro conjunto de obras (set) a lista volta a ser enviada', !j.unchanged && j.workers?.length === 3, JSON.stringify(j))
+  r = await getM(`&since=${j.generatedAt}`)
+  check('sem indicar o conjunto (tablets antigos) conta só a geração → unchanged', (await r.json()).unchanged === true)
+  // o dispositivo de uma só obra vê só a sua, sem obras por trabalhador
+  r = await getRoster('')
+  j = await r.json()
+  check('o dispositivo de uma só obra continua a receber só a sua obra, sem obras por trabalhador', r.status === 200 && j.workers.map((w) => w.sageId).join() === 'M1,M4' && j.workers.every((w) => !('obras' in w)) && j.sig === '' && j.obras.length === 1, JSON.stringify(j))
 }
 
 if (DEVICE_FRESH && CODE_FRESH) {

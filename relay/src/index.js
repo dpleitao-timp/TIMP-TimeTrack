@@ -83,6 +83,23 @@ const obraKey = (s) => String(s ?? '').trim().toLowerCase()
 // não pode picar nem ler a lista de trabalhadores (o `add-device.mjs` pede a obra). Devolve a Response de erro, ou null se tem obra.
 const noObra = (device, cors) => (obraKey(device.obra) ? null : json({ error: 'device_without_obra' }, 403, cors))
 
+// Obras em que o dispositivo pode picar: a sua obra fixa (a primeira, a por defeito) e as extra de `device_obras` (relógios que servem várias
+// obras, como o da sede). Só o relay as define: o tablet não as pede nem as alarga. Sem extras, é só a fixa, como sempre. Se a tabela ainda não
+// existe (migração 010 por aplicar) fica só a fixa, para o relay não deixar de aceitar picagens.
+async function deviceObras(env, device) {
+  const list = [device.obra.trim()]
+  try {
+    const { results } = await env.DB.prepare('SELECT obra FROM device_obras WHERE device_id = ? ORDER BY rowid').bind(device.id).all()
+    for (const r of results) {
+      const o = String(r.obra ?? '').trim()
+      if (o && o.length <= 64 && !list.some((x) => obraKey(x) === obraKey(o))) list.push(o)
+    }
+  } catch (e) {
+    console.error('device_obras:', e)
+  }
+  return list
+}
+
 // ------------------------------------------------------------------ autenticação do tablet: chave por dispositivo
 // Cada tablet gera uma chave ECDSA P-256 que o navegador não deixa exportar; o relay só tem a parte pública (devices.pub_key). Cada
 // pedido leva x-device-id, x-timestamp, x-nonce e x-signature = assinatura de
@@ -191,7 +208,7 @@ async function handlePunch(request, url, env) {
 
   const missing = noObra(device, cors)
   if (missing) return missing
-  const deviceObra = device.obra.trim() // a obra de todas as picagens deste dispositivo
+  const allowedObras = await deviceObras(env, device) // a obra fixa do dispositivo e as extra que o relay lhe deu
 
   const backlog = await env.DB.prepare('SELECT COUNT(*) AS n FROM outbox WHERE device_id = ?').bind(deviceId).first()
   if (backlog.n >= MAX_BACKLOG_PER_DEVICE) return json({ error: 'backlog_full' }, 429, cors)
@@ -202,6 +219,8 @@ async function handlePunch(request, url, env) {
   const rejected = []
   for (const p of punches) {
     const t = Date.parse(p?.punchedAt)
+    // a obra da picagem tem de ser uma das deste dispositivo; fica gravada tal como o relay a tem (não como o tablet a escreveu)
+    const punchObra = typeof p?.obra === 'string' ? allowedObras.find((o) => obraKey(o) === obraKey(p.obra)) : undefined
     const valid =
       eventIdOk(deviceId, p?.eventId) && // o ID tem de pertencer a este dispositivo
       typeof p?.sageId === 'string' &&
@@ -210,7 +229,7 @@ async function handlePunch(request, url, env) {
       typeof p?.obra === 'string' &&
       p.obra.trim() !== '' &&
       p.obra.length <= 64 &&
-      obraKey(p.obra) === obraKey(deviceObra) && // um tablet só pica na obra que o relay lhe atribuiu
+      punchObra !== undefined && // um tablet só pica nas obras que o relay lhe atribuiu
       DIRECTIONS.includes(p.direction) &&
       Number.isFinite(t) &&
       t - now < MAX_FUTURE_MS &&
@@ -222,7 +241,7 @@ async function handlePunch(request, url, env) {
     const payload = JSON.stringify({
       eventId: p.eventId,
       sageId: p.sageId.trim(),
-      obra: deviceObra,
+      obra: punchObra,
       direction: p.direction,
       punchedAt: new Date(t).toISOString(),
       confidence: similarity(p.confidence),
@@ -386,13 +405,36 @@ async function handleRosterGet(request, url, env) {
   const missing = noObra(device, cors)
   if (missing) return missing
   const obra = device.obra.trim()
+  const obras = await deviceObras(env, device) // [obra por defeito, ...extras]; só a por defeito na maioria dos relógios
+  const multi = obras.length > 1
+  // Assinatura do conjunto de obras: se o relay lhe der ou tirar obras, o tablet tem de ler a lista de novo mesmo sem lista nova do Supabase. O tablet
+  // devolve-a em `set`; sem `set` (tablets antigos) só conta a geração. Fica vazia nos relógios de uma só obra.
+  const sig = multi ? obras.map(obraKey).sort().join('|') : ''
 
   const head = await env.DB.prepare('SELECT MAX(gen) AS gen FROM roster').first()
   const generatedAt = head?.gen ?? 0
-  if (generatedAt && Number(url.searchParams.get('since')) === generatedAt) return json({ unchanged: true, generatedAt }, 200, cors)
+  const setOk = !url.searchParams.has('set') || url.searchParams.get('set') === sig
+  if (generatedAt && setOk && Number(url.searchParams.get('since')) === generatedAt) return json({ unchanged: true, generatedAt }, 200, cors)
 
-  const { results } = await env.DB.prepare('SELECT sage_id, name FROM roster WHERE lower(trim(obra)) = lower(?) AND active = 1 ORDER BY name LIMIT ?').bind(obra, MAX_ROSTER_LIST).all()
-  return json({ generatedAt, obra, workers: results.map((r) => ({ sageId: r.sage_id, name: r.name })) }, 200, cors)
+  if (!multi) {
+    const { results } = await env.DB.prepare('SELECT sage_id, name FROM roster WHERE lower(trim(obra)) = lower(?) AND active = 1 ORDER BY name LIMIT ?').bind(obra, MAX_ROSTER_LIST).all()
+    return json({ generatedAt, obra, obras, sig, workers: results.map((r) => ({ sageId: r.sage_id, name: r.name })) }, 200, cors)
+  }
+
+  // Relógio com várias obras: todos os trabalhadores ativos dessas obras, cada um com as obras em que está autorizado hoje (só as deste relógio,
+  // pela ordem delas: a por defeito primeiro). A lista da Supabase já traz só as atribuições em vigor no dia.
+  const marks = obras.map(() => 'lower(?)').join(',')
+  const { results } = await env.DB.prepare(`SELECT sage_id, name, obra FROM roster WHERE lower(trim(obra)) IN (${marks}) AND active = 1 ORDER BY name, sage_id LIMIT ?`).bind(...obras, MAX_ROSTER_LIST).all()
+  const bySage = new Map()
+  for (const r of results) {
+    const mine = obras.find((o) => obraKey(o) === obraKey(r.obra))
+    if (!mine) continue
+    const w = bySage.get(r.sage_id) ?? { sageId: r.sage_id, name: r.name, obras: [] }
+    if (!w.obras.includes(mine)) w.obras.push(mine)
+    bySage.set(r.sage_id, w)
+  }
+  const workers = [...bySage.values()].map((w) => ({ ...w, obras: obras.filter((o) => w.obras.includes(o)) }))
+  return json({ generatedAt, obra, obras, sig, workers }, 200, cors)
 }
 
 // ------------------------------------------------------------------ Supabase → relay: estado dos relógios

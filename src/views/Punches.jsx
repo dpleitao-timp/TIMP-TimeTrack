@@ -169,7 +169,7 @@ export default function Punches() {
                 <td>{t({ in: 'dir.in', out: 'dir.out', meal_out: 'dir.mealOut', meal_in: 'dir.mealIn' }[p.direction] ?? 'dir.out')}</td>
                 <td>{p.deviceId}</td>
                 <td>{p.confidence}</td>
-                <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : p.handed ? <span title={t('punches.handed')}>📱</span> : `⏳ (${p.attempts})`}</td>
+                <td>{p.synced ? '✔' : p.rejected ? <span title={t('punches.rejected')}>❌</span> : p.handed ? <span title={t('punches.handed')}>📱</span> : p.hold ? <span title={t('punches.held')}>🕒</span> : `⏳ (${p.attempts})`}</td>
                 <td><button className="link-button" onClick={() => remove(p)}>{t('punches.delete')}</button></td>
               </tr>
             ))}

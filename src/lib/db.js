@@ -129,12 +129,20 @@ async function assertNotLastAdmin(id, { allowIfOnlyWorker = false } = {}) {
 }
 
 // --- Lista de trabalhadores da obra (publicada pelo Supabase, lida do relay): só SAGE ID e nome ---
-export async function replaceRoster(workers, generatedAt, obra = '') {
+// `obras` e `sig`: nos relógios que servem várias obras, as obras do relógio (a por defeito primeiro) e a assinatura desse conjunto; cada trabalhador
+// traz as obras em que está autorizado hoje. Nos relógios de uma só obra ficam vazios.
+export async function replaceRoster(workers, generatedAt, obra = '', obras = [], sig = '') {
   const d = await db()
   const tx = d.transaction(['roster', 'meta'], 'readwrite')
   await tx.objectStore('roster').clear()
-  for (const w of workers) await tx.objectStore('roster').put({ sageId: String(w.sageId), name: w.name })
+  for (const w of workers) {
+    const entry = { sageId: String(w.sageId), name: w.name }
+    if (Array.isArray(w.obras) && w.obras.length) entry.obras = w.obras.map(String)
+    await tx.objectStore('roster').put(entry)
+  }
   await tx.objectStore('meta').put(generatedAt ?? 0, 'rosterGen')
+  await tx.objectStore('meta').put(Array.isArray(obras) ? obras.map(String) : [], 'rosterObras') // as obras que este relógio serve
+  await tx.objectStore('meta').put(String(sig ?? ''), 'rosterSig')
   await tx.objectStore('meta').put(obra, 'rosterObra') // a obra a que esta lista pertence
   await tx.objectStore('meta').put(Date.now(), 'rosterAt')
   await tx.done
@@ -152,7 +160,8 @@ export async function listRoster() {
 
 export async function rosterMeta() {
   const d = await db()
-  return { gen: (await d.get('meta', 'rosterGen')) || 0, at: (await d.get('meta', 'rosterAt')) || 0, obra: (await d.get('meta', 'rosterObra')) || '' }
+  const obras = (await d.get('meta', 'rosterObras')) || []
+  return { gen: (await d.get('meta', 'rosterGen')) || 0, at: (await d.get('meta', 'rosterAt')) || 0, obra: (await d.get('meta', 'rosterObra')) || '', obras, sig: (await d.get('meta', 'rosterSig')) || '' }
 }
 
 export async function setWorkerRole(id, role) {
@@ -212,7 +221,15 @@ export async function saveDeviceKeys(keys) {
 const queueChanged = () => window.dispatchEvent(new Event('queue-changed'))
 const round3 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null)
 // eventId = dispositivo + contador => reenvios idempotentes no servidor.
-export async function enqueuePunch({ deviceId, direction, sageId, workerName, obra, confidence, second = null, real = null, live = null }) {
+// Relógios que servem várias obras: as picagens de quem pode trabalhar em mais de uma obra ficam RETIDAS (`hold`, não seguem para o relay) até à saída.
+// Na saída escolhe-se a obra e todas as retidas desse dia, do mesmo trabalhador, seguem com ela (`release: true`); se esquecer a saída, às 00:00
+// seguem com a obra que tinham (a por defeito do relógio, ver `releaseExpiredHeld`).
+const calDay = (t) => {
+  const x = new Date(t)
+  return x.getFullYear() * 10000 + (x.getMonth() + 1) * 100 + x.getDate() // dia do calendário no fuso do tablet
+}
+
+export async function enqueuePunch({ deviceId, direction, sageId, workerName, obra, confidence, second = null, real = null, live = null, hold = false, release = false }) {
   const d = await db()
   const counter = await nextCounter()
   const offset = await getClockOffset()
@@ -232,9 +249,44 @@ export async function enqueuePunch({ deviceId, direction, sageId, workerName, ob
     synced: 0, // 0 = pendente, 1 = enviada (índice simples sem criar index)
     attempts: 0,
   }
-  await d.put('queue', punch)
+  if (hold) punch.hold = true // retida: só segue para o relay depois da saída (ou às 00:00)
+  // Numa só transação: a picagem entra e, se é a saída, libertam-se as retidas do mesmo trabalhador no mesmo dia com a obra escolhida (ou entra tudo ou nada)
+  const tx = d.transaction('queue', 'readwrite')
+  await tx.store.put(punch)
+  if (release) {
+    const day = calDay(punch.punchedAt)
+    for (const row of await tx.store.getAll()) {
+      if (row.hold && !row.synced && !row.voided && (row.sageId ?? row.workerId) === sageId && calDay(row.punchedAt) === day) {
+        const { hold: _h, ...rest } = row
+        await tx.store.put({ ...rest, obra })
+      }
+    }
+  }
+  await tx.done
   queueChanged()
   return punch
+}
+
+// Larga as picagens retidas de dias anteriores (ninguém picou a saída): seguem com a obra que já tinham. Passa a meia-noite pela hora corrigida do
+// tablet; se o tablet esteve desligado, faz-se ao voltar a ligar. Corre no máximo de minuto a minuto (lê a fila inteira). Devolve quantas libertou.
+let lastHeldCheck = 0
+export async function releaseExpiredHeld() {
+  if (Date.now() - lastHeldCheck < 60000) return 0
+  lastHeldCheck = Date.now()
+  const d = await db()
+  const today = calDay(Date.now() + (await getClockOffset()))
+  const tx = d.transaction('queue', 'readwrite')
+  let n = 0
+  for (const row of await tx.store.getAll()) {
+    if (row.hold && calDay(row.punchedAt) < today) {
+      const { hold: _h, ...rest } = row
+      await tx.store.put(rest)
+      n++
+    }
+  }
+  await tx.done
+  if (n) queueChanged()
+  return n
 }
 
 // Picagens que estão a ser enviadas neste momento: já podem ter chegado ao relay, por isso não se apagam.
@@ -324,7 +376,7 @@ export async function listQueue() {
 // Por enviar: nem enviadas nem recusadas (uma recusada não volta a ser enviada). Da mais antiga para a mais recente.
 export async function pendingPunches() {
   const d = await db()
-  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided && !p.handed)
+  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided && !p.handed && !p.hold) // as retidas esperam pela saída
   return rows.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))
 }
 
@@ -332,7 +384,7 @@ export async function pendingPunches() {
 // Picagens a passar a outro aparelho: as por enviar e, se se pedir, as já entregues (o outro aparelho ignora as que já importou).
 export async function exportablePunches(includeHanded = false) {
   const d = await db()
-  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided && (includeHanded || !p.handed))
+  const rows = (await d.getAll('queue')).filter((p) => !p.synced && !p.rejected && !p.voided && !p.hold && (includeHanded || !p.handed)) // as retidas ainda não têm a obra final
   return rows.sort((a, b) => (a.punchedAt < b.punchedAt ? -1 : 1))
 }
 

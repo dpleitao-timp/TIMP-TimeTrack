@@ -1,4 +1,4 @@
-import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta } from './db.js'
+import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta, releaseExpiredHeld } from './db.js'
 import { isCloudConfigured } from './settings.js'
 import { relayRequest } from './relay.js'
 
@@ -8,6 +8,7 @@ let running = false
 // Envia a fila para o relay (Cloudflare). O tablet não tem credenciais do Supabase: é o
 // Supabase que vem buscar as picagens ao relay. Seguro chamar repetidamente (idempotente por eventId).
 export async function flushQueue(settings) {
+  await releaseExpiredHeld().catch(() => {}) // picagens retidas à espera da saída de um dia que já acabou: seguem com a obra que tinham
   if (running || !isCloudConfigured(settings) || !navigator.onLine) return { sent: 0, pending: (await pendingPunches()).length }
   running = true
   let sent = 0
@@ -87,11 +88,12 @@ export async function syncRoster(settings, { force = false } = {}) {
   if (!isCloudConfigured(settings)) return { ok: false, error: 'not-configured' }
   if (!navigator.onLine) return { ok: false, error: 'offline' }
   try {
-    const { gen, obra: storedObra } = await rosterMeta()
+    const { gen, obra: storedObra, sig } = await rosterMeta()
     const obra = (settings.obra || '').trim()
     // Mudou a obra do tablet: a lista guardada é de outra obra, por isso lê-se sempre de novo (o "gen" é global e diria "sem alterações").
     const sameObra = storedObra.toLowerCase() === obra.toLowerCase()
-    const qs = new URLSearchParams({ device: settings.deviceId, obra, since: force || !sameObra ? '0' : String(gen) })
+    // `set`: o conjunto de obras que o relay deu a este relógio na última leitura; se mudou, o relay manda a lista de novo mesmo sem lista nova do Supabase.
+    const qs = new URLSearchParams({ device: settings.deviceId, obra, since: force || !sameObra ? '0' : String(gen), set: sig })
     const res = await relayRequest(settings, 'GET', `/roster?${qs}`)
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
     const body = await res.json()
@@ -99,7 +101,8 @@ export async function syncRoster(settings, { force = false } = {}) {
       await touchRoster()
       return { ok: true, unchanged: true }
     }
-    await replaceRoster(body.workers ?? [], body.generatedAt, obra)
+    // relógio de uma só obra (ou relay antigo): `obras` com 0 ou 1 obra, sem escolha de obra; com várias, cada trabalhador traz as suas
+    await replaceRoster(body.workers ?? [], body.generatedAt, obra, body.obras, body.sig)
     return { ok: true, count: (body.workers ?? []).length }
   } catch (e) {
     return { ok: false, error: String(e?.message || e) }

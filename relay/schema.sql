@@ -12,6 +12,14 @@ CREATE TABLE IF NOT EXISTS devices (
   code_expires INTEGER                       -- quando o código de instalação (token_hash) caduca; NULL = não caduca
 );
 
+-- Obras EXTRA em que um dispositivo também pode picar (além da sua `devices.obra`, a obra por defeito). Só o relay as define. Ver
+-- relay/migrations/010_device_obras.sql.
+CREATE TABLE IF NOT EXISTS device_obras (
+  device_id TEXT NOT NULL,
+  obra      TEXT NOT NULL,
+  PRIMARY KEY (device_id, obra)
+);
+
 -- Identificadores de pedidos já vistos: um pedido assinado não se pode repetir na janela de 5 minutos.
 CREATE TABLE IF NOT EXISTS device_nonces (
   device_id TEXT NOT NULL,

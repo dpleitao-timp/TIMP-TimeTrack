@@ -6,6 +6,9 @@ export const BAD_SHOW_MS = 1500 // "foto" / "não reconhecido" só aparecem se d
 // Não há definição que a desligue (o interruptor "Deteção de vida" foi retirado): sem piscar nem mexer a cabeça não há picagem nem entrada na administração.
 export const isAlive = (r) => r.blink || r.turn
 
+// A obra compara-se sem maiúsculas nem espaços nas pontas (como a intranet e o relay).
+export const sameObra = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+
 // Tipos de picagem que este tablet admite, pela ordem dos botões: entrada, saída para almoço/jantar, entrada de almoço/jantar, saída.
 // Depende do tipo de tablet (só de entradas, só de saídas) e de ter o almoço/jantar ligado.
 export const allowedDirections = (s) =>

@@ -12,7 +12,6 @@ const DEFAULTS = {
   obra: '', // obra onde está o tablet; vai em todas as picagens
   mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
   mealPunches: false, // mostra também "saída para almoço/jantar" e "entrada de almoço/jantar" (opcional, por tablet)
-  managed: false, // a obra, a função e o almoço/jantar vêm da intranet (página Time Clocks) através do relay: ficam só de leitura (ver sync.js, applyRemoteConfig)
   deviceId: '',
   deviceToken: '', // código de instalação (uso único) até o tablet se ligar; depois fica vazio (ver relay.js)
   enrolled: false, // o tablet já se ligou ao relay: tem uma chave própria, que o relay conhece (ver relay.js)

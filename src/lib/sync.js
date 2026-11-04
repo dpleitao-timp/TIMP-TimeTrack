@@ -84,19 +84,16 @@ async function flushVoids(settings) {
 
 // Configuração que a intranet (Time Clocks) definiu para este relógio e o relay entrega com a lista: a obra (a do relay é a que vale, o relay recusa
 // as picagens de outra), a função do tablet e o almoço/jantar. Só se aplica o que o relay trouxe: função e almoço/jantar a null (a intranet nunca os
-// definiu) deixam o que o tablet tem. Quando a intranet define a função, o tablet passa a "managed" e essas opções ficam só de leitura nas Definições.
+// definiu) deixam o que o tablet tem. Nas Definições estes três valores só se mostram: mudam-se na intranet.
 const MODES = ['both', 'in', 'out']
 function applyRemoteConfig(body) {
   const cur = loadSettings()
   const next = { ...cur }
   const cfg = body?.config
   if (typeof body?.obra === 'string' && body.obra.trim()) next.obra = body.obra.trim()
-  if (MODES.includes(cfg?.mode)) {
-    next.mode = cfg.mode
-    next.managed = true
-  }
+  if (MODES.includes(cfg?.mode)) next.mode = cfg.mode
   if (typeof cfg?.mealPunches === 'boolean') next.mealPunches = cfg.mealPunches
-  if (['obra', 'mode', 'mealPunches', 'managed'].every((k) => next[k] === cur[k])) return
+  if (['obra', 'mode', 'mealPunches'].every((k) => next[k] === cur[k])) return
   saveSettings(next)
   window.dispatchEvent(new Event('settings-changed')) // a interface relê as definições
 }

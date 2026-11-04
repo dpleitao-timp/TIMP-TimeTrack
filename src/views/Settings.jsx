@@ -23,7 +23,7 @@ export default function Settings({ settings, onChange }) {
     const sync = () => {
       const c = loadSettings()
       // também a obra, a função e o almoço/jantar, que a intranet pode ter mudado (ver sync.js, applyRemoteConfig)
-      setS((x) => ({ ...x, enrolled: c.enrolled, deviceToken: c.deviceToken, managed: c.managed, obra: c.managed ? c.obra : x.obra, mode: c.managed ? c.mode : x.mode, mealPunches: c.managed ? c.mealPunches : x.mealPunches }))
+      setS((x) => ({ ...x, enrolled: c.enrolled, deviceToken: c.deviceToken, obra: c.obra, mode: c.mode, mealPunches: c.mealPunches }))
     }
     window.addEventListener('settings-changed', sync)
     return () => window.removeEventListener('settings-changed', sync)
@@ -82,9 +82,9 @@ export default function Settings({ settings, onChange }) {
       next.enrolled = true
       next.deviceToken = ''
     }
-    // Obra, função e almoço/jantar definidos na intranet: o que está guardado manda (a cópia desta página pode estar atrasada)
+    // Obra, função e almoço/jantar vêm da intranet (relay): o que está guardado manda (a cópia desta página pode estar atrasada)
     const stored = loadSettings()
-    if (stored.managed) Object.assign(next, { managed: true, obra: stored.obra, mode: stored.mode, mealPunches: stored.mealPunches })
+    Object.assign(next, { obra: stored.obra, mode: stored.mode, mealPunches: stored.mealPunches })
     if (next.relayUrl && !isSecureUrl(next.relayUrl)) {
       setMsg('')
       return setErr(t('settings.relayUrlBad'))
@@ -148,7 +148,7 @@ export default function Settings({ settings, onChange }) {
 
   // Interruptor com título e explicação
   const toggle = (k, label, hint) => (
-    <button type="button" className="switch-row" disabled={k === 'mealPunches' && !!s.managed} onClick={() => setS({ ...s, [k]: !s[k] })}>
+    <button type="button" className="switch-row" onClick={() => setS({ ...s, [k]: !s[k] })}>
       <span>
         {label}
         <small>{hint}</small>
@@ -169,22 +169,17 @@ export default function Settings({ settings, onChange }) {
               {t('settings.deviceId')} *
               <input className="field-input" value={s.deviceId} onChange={set('deviceId')} readOnly={!!s.enrolled && !newCode} />
             </label>
-            <label className="field">
-              {t('settings.obra')} *
-              <input className="field-input" value={s.obra} onChange={set('obra')} maxLength={64} readOnly={!!s.managed} />
-              <small>{t('settings.obraHint')}</small>
-            </label>
-            {s.managed && <p className="notice notice-info">{t('settings.managedHint')}</p>}
-            <label className="field">
-              {t('settings.mode')}
-              <select className="field-select" value={s.mode} onChange={set('mode')} disabled={!!s.managed}>
-                <option value="both">{t('settings.modeBoth')}</option>
-                <option value="in">{t('settings.modeIn')}</option>
-                <option value="out">{t('settings.modeOut')}</option>
-              </select>
-              <small>{t('settings.modeHint')}</small>
-            </label>
-            {toggle('mealPunches', t('settings.meal'), t('settings.mealHint'))}
+            {/* A obra, a função e o almoço/jantar definem-se na intranet (Time Clocks) e chegam do relay: aqui só se mostram */}
+            <div className="field">
+              {t('settings.fromIntranet')}
+              <p className="notice notice-info" style={{ margin: '6px 0 0' }}>
+                {t('settings.intranetValues', {
+                  obra: (s.obra || '').trim() || '—',
+                  mode: t({ both: 'settings.modeBoth', in: 'settings.modeIn', out: 'settings.modeOut' }[s.mode] ?? 'settings.modeBoth'),
+                  meal: s.mealPunches ? ` · ${t('settings.meal')}` : '',
+                })}
+              </p>
+            </div>
             <label className="field">
               {t('settings.theme')}
               <select

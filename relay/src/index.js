@@ -18,7 +18,7 @@ const MAX_PULL = 500
 const MAX_ACK = 500
 const SIGNATURE_SKEW_S = 300
 const MAX_ROSTER_CHUNK = 500
-const MAX_ROSTER_LIST = 3000 // trabalhadores devolvidos a um tablet
+const MAX_ROSTER_LIST = 10000 // linhas (trabalhador e obra) devolvidas a um tablet; um relógio de várias obras pode receber a empresa toda
 
 const enc = new TextEncoder()
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -86,13 +86,22 @@ const noObra = (device, cors) => (obraKey(device.obra) ? null : json({ error: 'd
 // Obras em que o dispositivo pode picar: a sua obra fixa (a primeira, a por defeito) e as extra de `device_obras` (relógios que servem várias
 // obras, como o da sede). Só o relay as define: o tablet não as pede nem as alarga. Sem extras, é só a fixa, como sempre. Se a tabela ainda não
 // existe (migração 010 por aplicar) fica só a fixa, para o relay não deixar de aceitar picagens.
+// A linha especial `*` em device_obras quer dizer "todas as obras da lista de trabalhadores" (as que têm trabalhadores ativos hoje): o relógio aceita e lista
+// também as obras que vierem a existir, sem ninguém mexer no relay. Continua a valer a autorização de cada trabalhador (cada um só vê as suas obras).
+const ALL_OBRAS = '*'
 async function deviceObras(env, device) {
   const list = [device.obra.trim()]
+  const add = (o) => {
+    o = String(o ?? '').trim()
+    if (o && o !== ALL_OBRAS && o.length <= 64 && !list.some((x) => obraKey(x) === obraKey(o))) list.push(o)
+  }
   try {
     const { results } = await env.DB.prepare('SELECT obra FROM device_obras WHERE device_id = ? ORDER BY rowid').bind(device.id).all()
-    for (const r of results) {
-      const o = String(r.obra ?? '').trim()
-      if (o && o.length <= 64 && !list.some((x) => obraKey(x) === obraKey(o))) list.push(o)
+    const all = results.some((r) => String(r.obra ?? '').trim() === ALL_OBRAS)
+    for (const r of results) add(r.obra)
+    if (all) {
+      const { results: rows } = await env.DB.prepare('SELECT DISTINCT obra FROM roster WHERE active = 1 ORDER BY obra').all()
+      for (const r of rows) add(r.obra)
     }
   } catch (e) {
     console.error('device_obras:', e)
@@ -409,7 +418,7 @@ async function handleRosterGet(request, url, env) {
   const multi = obras.length > 1
   // Assinatura do conjunto de obras: se o relay lhe der ou tirar obras, o tablet tem de ler a lista de novo mesmo sem lista nova do Supabase. O tablet
   // devolve-a em `set`; sem `set` (tablets antigos) só conta a geração. Fica vazia nos relógios de uma só obra.
-  const sig = multi ? obras.map(obraKey).sort().join('|') : ''
+  const sig = multi ? (await sha256Hex(obras.map(obraKey).sort().join('|'))).slice(0, 24) : '' // um resumo: a lista de obras pode ter dezenas de nomes
 
   const head = await env.DB.prepare('SELECT MAX(gen) AS gen FROM roster').first()
   const generatedAt = head?.gen ?? 0
@@ -423,17 +432,23 @@ async function handleRosterGet(request, url, env) {
 
   // Relógio com várias obras: todos os trabalhadores ativos dessas obras, cada um com as obras em que está autorizado hoje (só as deste relógio,
   // pela ordem delas: a por defeito primeiro). A lista da Supabase já traz só as atribuições em vigor no dia.
+  // O D1 só aceita 100 parâmetros por consulta: com muitas obras (relógio de "todas as obras") não se filtra no SQL, filtra-se aqui.
+  const filterSql = obras.length <= 90
   const marks = obras.map(() => 'lower(?)').join(',')
-  const { results } = await env.DB.prepare(`SELECT sage_id, name, obra FROM roster WHERE lower(trim(obra)) IN (${marks}) AND active = 1 ORDER BY name, sage_id LIMIT ?`).bind(...obras, MAX_ROSTER_LIST).all()
+  const { results } = await env.DB.prepare(`SELECT sage_id, name, obra FROM roster WHERE ${filterSql ? `lower(trim(obra)) IN (${marks}) AND ` : ''}active = 1 ORDER BY name, sage_id LIMIT ?`)
+    .bind(...(filterSql ? obras : []), MAX_ROSTER_LIST)
+    .all()
+  if (results.length >= MAX_ROSTER_LIST) console.error('roster: lista cortada no limite de', MAX_ROSTER_LIST, 'linhas')
+  const canon = new Map(obras.map((o) => [obraKey(o), o])) // obra (sem maiúsculas) → nome do relay
   const bySage = new Map()
   for (const r of results) {
-    const mine = obras.find((o) => obraKey(o) === obraKey(r.obra))
+    const mine = canon.get(obraKey(r.obra))
     if (!mine) continue
-    const w = bySage.get(r.sage_id) ?? { sageId: r.sage_id, name: r.name, obras: [] }
-    if (!w.obras.includes(mine)) w.obras.push(mine)
+    const w = bySage.get(r.sage_id) ?? { sageId: r.sage_id, name: r.name, have: new Set() }
+    w.have.add(mine)
     bySage.set(r.sage_id, w)
   }
-  const workers = [...bySage.values()].map((w) => ({ ...w, obras: obras.filter((o) => w.obras.includes(o)) }))
+  const workers = [...bySage.values()].map((w) => ({ sageId: w.sageId, name: w.name, obras: obras.filter((o) => w.have.has(o)) })) // a por defeito primeiro
   return json({ generatedAt, obra, obras, sig, workers }, 200, cors)
 }
 

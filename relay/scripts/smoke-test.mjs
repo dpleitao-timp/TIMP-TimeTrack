@@ -2,14 +2,15 @@
 //   RELAY=http://127.0.0.1:8787 DEVICE=dev-test CODE=<código de instalação> SECRET=<PULL_SECRET> node relay/scripts/smoke-test.mjs
 // O dispositivo tem de ter a obra OBRA-TESTE no relay. O teste liga-o com o código de instalação (uso único; depois usa a chave guardada em
 // KEYDIR, ver _device.mjs). Opcionais: DEVICE_NO_OBRA e CODE_NO_OBRA (dispositivo SEM obra); DEVICE_FRESH e CODE_FRESH (por ligar, para
-// testar a ligação); DEVICE_MULTI e CODE_MULTI (obra OBRA-TESTE e a obra extra OBRA-B em device_obras); DEVICE_EXPIRED e CODE_EXPIRED (código caducado); DEVICE_REVOKED e CODE_REVOKED (dispositivo revogado).
+// testar a ligação); DEVICE_MULTI e CODE_MULTI (obra OBRA-TESTE e a obra extra OBRA-B em device_obras); DEVICE_ALL e CODE_ALL (obra OBRA-TESTE e a linha '*' em device_obras: todas as obras da lista); DEVICE_EXPIRED e CODE_EXPIRED (código caducado); DEVICE_REVOKED e CODE_REVOKED (dispositivo revogado).
 import { createHmac } from 'node:crypto'
 import { loadClient, enroll, newKeys } from './_device.mjs'
 
-const { RELAY = 'http://127.0.0.1:8787', DEVICE = 'dev-test', CODE, SECRET, DEVICE_NO_OBRA, CODE_NO_OBRA, DEVICE_FRESH, CODE_FRESH, DEVICE_EXPIRED, CODE_EXPIRED, DEVICE_REVOKED, CODE_REVOKED, DEVICE_MULTI, CODE_MULTI } = process.env
+const { RELAY = 'http://127.0.0.1:8787', DEVICE = 'dev-test', CODE, SECRET, DEVICE_NO_OBRA, CODE_NO_OBRA, DEVICE_FRESH, CODE_FRESH, DEVICE_EXPIRED, CODE_EXPIRED, DEVICE_REVOKED, CODE_REVOKED, DEVICE_MULTI, CODE_MULTI, DEVICE_ALL, CODE_ALL } = process.env
 if (!SECRET) throw new Error('Defina SECRET (e CODE, ou uma chave já guardada em KEYDIR)')
 const dev = await loadClient(RELAY, DEVICE, CODE) // o tablet de teste, ligado ao relay
 const multi = DEVICE_MULTI ? await loadClient(RELAY, DEVICE_MULTI, CODE_MULTI) : null // opcional: relógio com obras extra (OBRA-TESTE por defeito e OBRA-B em device_obras)
+const all = DEVICE_ALL ? await loadClient(RELAY, DEVICE_ALL, CODE_ALL) : null // opcional: relógio de todas as obras (obra OBRA-TESTE e a linha '*' em device_obras)
 const noObraDev = DEVICE_NO_OBRA ? await loadClient(RELAY, DEVICE_NO_OBRA, CODE_NO_OBRA) : null
 
 let failed = 0
@@ -300,6 +301,37 @@ if (multi) {
   r = await getRoster('')
   j = await r.json()
   check('o dispositivo de uma só obra continua a receber só a sua obra, sem obras por trabalhador', r.status === 200 && j.workers.map((w) => w.sageId).join() === 'M1,M4' && j.workers.every((w) => !('obras' in w)) && j.sig === '' && j.obras.length === 1, JSON.stringify(j))
+}
+
+// Relógio de "todas as obras" (linha `*` em device_obras): aceita as obras que a lista tem (mesmo as que não estavam quando se configurou) e recusa as outras
+if (all) {
+  const aid = (n) => `${DEVICE_ALL}-${String(base + n).padStart(6, '0')}`
+  const ap = (n, over = {}) => punch(base + n, { eventId: aid(n), ...over })
+  const genA = Date.now() + 20
+  await signed('POST', '/roster', JSON.stringify({ gen: genA, final: true, workers: [
+    { sageId: 'N1', name: 'Nuno Alves', obra: 'OBRA-TESTE', active: true },
+    { sageId: 'N1', name: 'Nuno Alves', obra: 'OBRA-NOVA', active: true },
+    { sageId: 'N2', name: 'Olga Pinto', obra: 'OBRA-NOVA', active: true },
+    { sageId: 'N3', name: 'Paulo Reis', obra: 'OBRA-SEM-ATIVOS', active: false },
+  ] }))
+  r = await all.req('POST', '/punch', { deviceId: DEVICE_ALL, punches: [ap(600, { obra: 'OBRA-NOVA' }), ap(601, { obra: ' obra-nova ' }), ap(602, { obra: 'OBRA-TESTE' }), ap(603, { obra: 'OBRA-INVENTADA' }), ap(604, { obra: 'OBRA-SEM-ATIVOS' })] })
+  j = await r.json()
+  check('relógio de todas as obras: aceita as da lista e recusa as que a lista não tem', r.status === 200 && j.rejected.sort().join() === [aid(603), aid(604)].sort().join(), JSON.stringify(j))
+  r = await signed('GET', '/pull?limit=100')
+  j = await r.json()
+  check('grava a obra com o nome do relay', j.punches.find((p) => p.eventId === aid(601))?.obra === 'OBRA-NOVA', JSON.stringify(j.punches.find((p) => p.eventId === aid(601))))
+  await signed('POST', '/ack', JSON.stringify({ eventIds: [aid(600), aid(601), aid(602)] })) // limpeza
+  r = await all.req('GET', `/roster?device=${DEVICE_ALL}`)
+  j = await r.json()
+  const aby = Object.fromEntries((j.workers || []).map((w) => [w.sageId, w.obras.join('|')]))
+  check('a lista de todas as obras traz as obras de cada trabalhador (a por defeito primeiro)', JSON.stringify(aby) === JSON.stringify({ N1: 'OBRA-TESTE|OBRA-NOVA', N2: 'OBRA-NOVA' }) && j.obras.join() === 'OBRA-TESTE,OBRA-NOVA', JSON.stringify(j))
+  check('a assinatura do conjunto de obras é um resumo curto', /^[0-9a-f]{24}$/.test(j.sig), j.sig)
+  // uma obra nova na lista passa a valer sozinha, e a lista é enviada de novo mesmo sem ter mudado a geração do Supabase? (muda: é um envio novo)
+  await signed('POST', '/roster', JSON.stringify({ gen: genA + 1, final: true, workers: [{ sageId: 'N1', name: 'Nuno Alves', obra: 'OBRA-TESTE', active: true }, { sageId: 'N1', name: 'Nuno Alves', obra: 'OBRA-MAIS-NOVA', active: true }] }))
+  r = await all.req('POST', '/punch', { deviceId: DEVICE_ALL, punches: [ap(610, { obra: 'OBRA-MAIS-NOVA' }), ap(611, { obra: 'OBRA-NOVA' })] })
+  j = await r.json()
+  check('uma obra que aparece na lista passa a ser aceite sem mexer no relay (e uma que saiu deixa de ser)', r.status === 200 && j.rejected.join() === aid(611), JSON.stringify(j))
+  await signed('POST', '/ack', JSON.stringify({ eventIds: [aid(610)] })) // limpeza
 }
 
 if (DEVICE_FRESH && CODE_FRESH) {

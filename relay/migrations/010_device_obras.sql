@@ -8,6 +8,8 @@
 --   npx wrangler d1 execute timp-punch-relay --remote --config relay/wrangler.jsonc --file=relay/migrations/010_device_obras.sql
 -- Dar obras extra a um relógio:
 --   npx wrangler d1 execute timp-punch-relay --remote --config relay/wrangler.jsonc --command "INSERT INTO device_obras (device_id, obra) VALUES ('dev-sede', 'OBRA-A')"
+-- Todas as obras da lista de trabalhadores (também as que vierem a existir, sem voltar a mexer aqui): uma linha com `*`
+--   npx wrangler d1 execute timp-punch-relay --remote --config relay/wrangler.jsonc --command "INSERT INTO device_obras (device_id, obra) VALUES ('dev-sede', '*')"
 -- Tirar:
 --   npx wrangler d1 execute timp-punch-relay --remote --config relay/wrangler.jsonc --command "DELETE FROM device_obras WHERE device_id = 'dev-sede' AND obra = 'OBRA-A'"
 CREATE TABLE IF NOT EXISTS device_obras (

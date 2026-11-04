@@ -283,7 +283,7 @@ export default function App() {
         <LanguageSwitch />
         <span className="header-chip">
           <i className={online ? 'dot dot-on' : 'dot dot-off'} />
-          {settings.deviceName} · {online ? t('kiosk.online') : t('kiosk.offline')} · {t('kiosk.pendingSend', { n: pending })}
+          {settings.deviceId} · {online ? t('kiosk.online') : t('kiosk.offline')} · {t('kiosk.pendingSend', { n: pending })}
         </span>
       </header>
       {hasAdmin === false && !admin && !missingFields(settings).length && ( // tablet novo (por configurar): sem avisos, só o botão Administração

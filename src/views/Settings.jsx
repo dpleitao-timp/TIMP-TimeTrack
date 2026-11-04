@@ -22,7 +22,8 @@ export default function Settings({ settings, onChange }) {
   useEffect(() => {
     const sync = () => {
       const c = loadSettings()
-      setS((x) => ({ ...x, enrolled: c.enrolled, deviceToken: c.deviceToken }))
+      // também a obra, a função e o almoço/jantar, que a intranet pode ter mudado (ver sync.js, applyRemoteConfig)
+      setS((x) => ({ ...x, enrolled: c.enrolled, deviceToken: c.deviceToken, managed: c.managed, obra: c.managed ? c.obra : x.obra, mode: c.managed ? c.mode : x.mode, mealPunches: c.managed ? c.mealPunches : x.mealPunches }))
     }
     window.addEventListener('settings-changed', sync)
     return () => window.removeEventListener('settings-changed', sync)
@@ -75,23 +76,28 @@ export default function Settings({ settings, onChange }) {
   async function save() {
     const reload = s.engine !== settings.engine || s.backend !== settings.backend || Number(s.detectorConfidence) !== Number(settings.detectorConfidence)
     // sem espaços nas pontas (uma colagem com um espaço a mais deixava o token ou o endereço inválidos)
-    const next = { ...s, deviceName: (s.deviceName || '').trim(), deviceId: (s.deviceId || '').trim(), relayUrl: (s.relayUrl || '').trim(), deviceToken: (s.deviceToken || '').trim(), obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), thresholdSface: Number(s.thresholdSface) }
+    const next = { ...s, deviceId: (s.deviceId || '').trim(), relayUrl: (s.relayUrl || '').trim(), deviceToken: (s.deviceToken || '').trim(), obra: (s.obra || '').trim(), threshold: Number(s.threshold), cooldownSec: Number(s.cooldownSec), stableFrames: Number(s.stableFrames), avgFrames: Number(s.avgFrames), antispoofMin: Number(s.antispoofMin), detectorConfidence: Number(s.detectorConfidence), thresholdSface: Number(s.thresholdSface) }
     // O que está guardado manda no estado "ligado" (a cópia desta página pode estar atrasada).
     if (loadSettings().enrolled === true && !newCode) {
       next.enrolled = true
       next.deviceToken = ''
     }
+    // Obra, função e almoço/jantar definidos na intranet: o que está guardado manda (a cópia desta página pode estar atrasada)
+    const stored = loadSettings()
+    if (stored.managed) Object.assign(next, { managed: true, obra: stored.obra, mode: stored.mode, mealPunches: stored.mealPunches })
     if (next.relayUrl && !isSecureUrl(next.relayUrl)) {
       setMsg('')
       return setErr(t('settings.relayUrlBad'))
     }
     // Os campos obrigatórios têm de estar preenchidos: sem eles o tablet não pica (ver missingFields), por isso não se guarda assim.
-    const missing = missingFields(next)
+    // A obra não se exige para guardar: chega do relay (definida na intranet) logo que o tablet se liga, e sem ela o tablet não pica.
+    const missing = missingFields(next).filter((k) => k !== 'obra')
     if (missing.length) {
       setMsg('')
       return setErr(t('settings.required', { list: missing.map((k) => t(`settings.${k}`)).join(', ') }))
     }
     setErr('')
+    const connecting = !!next.deviceToken // vai ligar-se ao relay agora: depois lê já a obra e a configuração
     // Código de instalação por gastar (tablet novo, ligar de novo, ou token de uma versão antiga): liga o tablet ao relay agora. Se
     // falhar, não se guarda nada, para o tablet não ficar com um código escrito que não serve.
     if (next.deviceToken) {
@@ -109,8 +115,8 @@ export default function Settings({ settings, onChange }) {
     }
     onChange(next)
     setMsg(t('settings.saved'))
-    if (next.obra.toLowerCase() !== (settings.obra || '').trim().toLowerCase()) {
-      // mudou a obra: vai buscar já a lista da nova obra
+    if (connecting || next.obra.toLowerCase() !== (settings.obra || '').trim().toLowerCase()) {
+      // ligou-se agora ou mudou a obra: vai buscar já a lista, a obra e a configuração do relay
       syncRoster(next).then((r) => {
         loadRoster()
         if (r.ok) window.dispatchEvent(new Event('roster-updated'))
@@ -142,7 +148,7 @@ export default function Settings({ settings, onChange }) {
 
   // Interruptor com título e explicação
   const toggle = (k, label, hint) => (
-    <button type="button" className="switch-row" onClick={() => setS({ ...s, [k]: !s[k] })}>
+    <button type="button" className="switch-row" disabled={k === 'mealPunches' && !!s.managed} onClick={() => setS({ ...s, [k]: !s[k] })}>
       <span>
         {label}
         <small>{hint}</small>
@@ -160,21 +166,18 @@ export default function Settings({ settings, onChange }) {
           <section className="card">
             <h2>{t('settings.device')}</h2>
             <label className="field">
-              {t('settings.deviceName')} *
-              <input className="field-input" value={s.deviceName} onChange={set('deviceName')} />
-            </label>
-            <label className="field">
               {t('settings.deviceId')} *
               <input className="field-input" value={s.deviceId} onChange={set('deviceId')} readOnly={!!s.enrolled && !newCode} />
             </label>
             <label className="field">
               {t('settings.obra')} *
-              <input className="field-input" value={s.obra} onChange={set('obra')} maxLength={64} />
+              <input className="field-input" value={s.obra} onChange={set('obra')} maxLength={64} readOnly={!!s.managed} />
               <small>{t('settings.obraHint')}</small>
             </label>
+            {s.managed && <p className="notice notice-info">{t('settings.managedHint')}</p>}
             <label className="field">
               {t('settings.mode')}
-              <select className="field-select" value={s.mode} onChange={set('mode')}>
+              <select className="field-select" value={s.mode} onChange={set('mode')} disabled={!!s.managed}>
                 <option value="both">{t('settings.modeBoth')}</option>
                 <option value="in">{t('settings.modeIn')}</option>
                 <option value="out">{t('settings.modeOut')}</option>

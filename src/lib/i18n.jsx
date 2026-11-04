@@ -29,6 +29,7 @@ const dict = {
     'dir.mealIn': 'Entrada de almoço/jantar',
     'kiosk.alreadyToday': '{name}, já tem “{type}” registada hoje. Qual o movimento?',
     'kiosk.whichObra': '{name}, em que obra trabalhou?',
+    'settings.managedHint': 'A obra, a função do tablet e o almoço/jantar são definidos na intranet (Time Clocks) e atualizam-se aqui sozinhos, de 5 em 5 minutos.',
     'kiosk.allDoneToday': '{name}, já registou hoje todos os movimentos disponíveis neste tablet.',
 
     'kiosk.admin': '🔒 Administração',
@@ -209,7 +210,6 @@ const dict = {
     'punches.reset': 'repor',
 
     'settings.device': 'Dispositivo',
-    'settings.deviceName': 'Nome do dispositivo',
     'settings.deviceId': 'ID do dispositivo',
     'settings.obra': 'Obra',
     'settings.obraHint': 'Código ou nome da obra onde está este tablet. Vai em todas as picagens e é obrigatório para picar.',
@@ -270,6 +270,7 @@ const dict = {
     'dir.mealIn': 'Back from lunch/dinner',
     'kiosk.alreadyToday': '{name}, “{type}” is already recorded today. Which movement?',
     'kiosk.whichObra': '{name}, which job site did you work on?',
+    'settings.managedHint': 'The job site, the tablet function and lunch/dinner are set in the intranet (Time Clocks) and update here by themselves every 5 minutes.',
     'kiosk.allDoneToday': '{name}, you have already recorded every movement available on this tablet today.',
 
     'kiosk.admin': '🔒 Administration',
@@ -450,7 +451,6 @@ const dict = {
     'punches.reset': 'reset',
 
     'settings.device': 'Device',
-    'settings.deviceName': 'Device name',
     'settings.deviceId': 'Device ID',
     'settings.obra': 'Job site',
     'settings.obraHint': 'Code or name of the job site where this tablet is. It is sent with every punch and is required to clock in or out.',
@@ -511,6 +511,7 @@ const dict = {
     'dir.mealIn': 'Retour du déjeuner/dîner',
     'kiosk.alreadyToday': '{name}, « {type} » est déjà enregistré aujourd’hui. Quel mouvement ?',
     'kiosk.whichObra': '{name}, sur quel chantier avez-vous travaillé ?',
+    'settings.managedHint': 'Le chantier, la fonction de la tablette et le déjeuner/dîner sont définis dans l’intranet (Time Clocks) et se mettent à jour ici tout seuls toutes les 5 minutes.',
     'kiosk.allDoneToday': '{name}, vous avez déjà enregistré aujourd’hui tous les mouvements disponibles sur cette tablette.',
 
     'kiosk.admin': '🔒 Administration',
@@ -691,7 +692,6 @@ const dict = {
     'punches.reset': 'réinitialiser',
 
     'settings.device': 'Appareil',
-    'settings.deviceName': 'Nom de l’appareil',
     'settings.deviceId': 'ID de l’appareil',
     'settings.obra': 'Chantier',
     'settings.obraHint': 'Code ou nom du chantier où se trouve cette tablette. Il est envoyé avec chaque pointage et est obligatoire pour pointer.',
@@ -752,6 +752,7 @@ const dict = {
     'dir.mealIn': 'Pause: zurück (Mittag-/Abendessen)',
     'kiosk.alreadyToday': '{name}, „{type}“ ist heute bereits erfasst. Welche Buchung?',
     'kiosk.whichObra': '{name}, auf welcher Baustelle haben Sie gearbeitet?',
+    'settings.managedHint': 'Baustelle, Funktion des Tablets und Mittag-/Abendessen werden im Intranet (Time Clocks) festgelegt und aktualisieren sich hier alle 5 Minuten von selbst.',
     'kiosk.allDoneToday': '{name}, Sie haben heute bereits alle auf diesem Tablet verfügbaren Buchungen erfasst.',
 
     'kiosk.admin': '🔒 Verwaltung',
@@ -932,7 +933,6 @@ const dict = {
     'punches.reset': 'zurücksetzen',
 
     'settings.device': 'Gerät',
-    'settings.deviceName': 'Gerätename',
     'settings.deviceId': 'Geräte-ID',
     'settings.obra': 'Baustelle',
     'settings.obraHint': 'Code oder Name der Baustelle, auf der dieses Tablet steht. Wird mit jeder Stempelung gesendet und ist zum Stempeln erforderlich.',

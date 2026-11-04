@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
   pub_key     TEXT,                          -- chave pública do tablet (ECDSA P-256, SPKI base64url); NULL = ainda não ligado
   enrolled_at INTEGER,                       -- quando o tablet se ligou
-  code_expires INTEGER                       -- quando o código de instalação (token_hash) caduca; NULL = não caduca
+  code_expires INTEGER,                      -- quando o código de instalação (token_hash) caduca; NULL = não caduca
+  mode        TEXT,                          -- função do tablet definida na intranet: 'both' | 'in' | 'out'; NULL = vale o que o tablet tem
+  meal_punches INTEGER                       -- almoço/jantar definido na intranet: 1 | 0; NULL = vale o que o tablet tem
 );
 
 -- Obras EXTRA em que um dispositivo também pode picar (além da sua `devices.obra`, a obra por defeito). Só o relay as define. Ver

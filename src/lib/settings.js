@@ -12,7 +12,7 @@ const DEFAULTS = {
   obra: '', // obra onde está o tablet; vai em todas as picagens
   mode: 'both', // 'both' | 'in' | 'out': tablet de entradas e saídas, só de entradas ou só de saídas
   mealPunches: false, // mostra também "saída para almoço/jantar" e "entrada de almoço/jantar" (opcional, por tablet)
-  deviceName: 'Tablet 1',
+  managed: false, // a obra, a função e o almoço/jantar vêm da intranet (página Time Clocks) através do relay: ficam só de leitura (ver sync.js, applyRemoteConfig)
   deviceId: '',
   deviceToken: '', // código de instalação (uso único) até o tablet se ligar; depois fica vazio (ver relay.js)
   enrolled: false, // o tablet já se ligou ao relay: tem uma chave própria, que o relay conhece (ver relay.js)
@@ -62,6 +62,11 @@ export function loadSettings() {
   // A biometria já não sai do tablet (a partilha entre tablets foi retirada): apaga a chave da frota, que estava guardada em claro.
   if ('bioKey' in s) {
     delete merged.bioKey
+    saveSettings(merged)
+  }
+  // O nome do dispositivo foi retirado (o ID do dispositivo já o identifica): apaga a definição antiga.
+  if ('deviceName' in s) {
+    delete merged.deviceName
     saveSettings(merged)
   }
   // o repouso passou a ser a norma (sem horário nem fim de semana): apaga as definições antigas
@@ -131,6 +136,6 @@ const hasCredential = (s) => s.enrolled === true || !!String(s.deviceToken ?? ''
 export const isCloudConfigured = (s) => !!(isSecureUrl(s.relayUrl) && hasCredential(s))
 
 // Campos sem os quais o tablet não funciona (não pica): dizem quem é, onde está e como fala com o relay.
-const REQUIRED_FIELDS = ['deviceName', 'deviceId', 'obra', 'relayUrl', 'deviceToken']
+const REQUIRED_FIELDS = ['deviceId', 'obra', 'relayUrl', 'deviceToken']
 // Os que faltam, pela ordem das Definições. O "token" é o código de instalação: está satisfeito se o tablet já se ligou ao relay.
 export const missingFields = (s) => REQUIRED_FIELDS.filter((k) => (k === 'deviceToken' ? !hasCredential(s) : k === 'relayUrl' ? !isSecureUrl(s.relayUrl) : !String(s[k] ?? '').trim()))

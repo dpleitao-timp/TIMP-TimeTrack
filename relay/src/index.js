@@ -4,6 +4,7 @@
 //   Tablet  ◄── GET /roster ──  [roster]  ◄── POST /roster ──  Supabase
 //   Tablet  ── POST /punch/delete ──►  [deletions]  ◄── GET /pull-deletions, POST /ack-deletions ──  Supabase
 //   Tablet  ── qualquer pedido autenticado ──►  [devices.last_seen]  ◄── GET /devices-status ──  Supabase (função relay-status da intranet)
+//   [devices, device_obras]  ◄── POST /devices-config ──  Supabase (função relay-device-config da intranet: registar, obras, revogar)
 //
 // O tablet escreve picagens (e pedidos para as apagar) e lê a lista de trabalhadores (pedidos assinados com a chave do tablet). O Supabase lê as picagens,
 // confirma-as e publica a lista (pedidos assinados com HMAC). Nenhum dos dois lados tem credenciais do outro.
@@ -401,6 +402,18 @@ async function handleRosterPost(request, url, env) {
   return json({ stored: workers.length - rejected, rejected })
 }
 
+// Configuração do relógio definida na intranet (função e almoço/jantar), que o tablet aplica com a lista. null = a intranet não definiu. Se as colunas
+// ainda não existem (migração 011 por aplicar) devolve tudo a null, para a lista continuar a funcionar.
+async function deviceConfig(env, deviceId) {
+  try {
+    const c = await env.DB.prepare('SELECT mode, meal_punches FROM devices WHERE id = ?').bind(deviceId).first()
+    return { mode: ['both', 'in', 'out'].includes(c?.mode) ? c.mode : null, mealPunches: c?.meal_punches === 0 || c?.meal_punches === 1 ? c.meal_punches === 1 : null }
+  } catch (e) {
+    console.error('device config:', e)
+    return { mode: null, mealPunches: null }
+  }
+}
+
 // ------------------------------------------------------------------ tablet ← relay: lista da obra do tablet
 // GET /roster?device=<id>&obra=<obra>&since=<gen>  (pedido assinado pelo tablet)
 // A obra é a do dispositivo no relay (o tablet não consegue pedir outras obras; `obra` na pergunta já não conta).
@@ -423,11 +436,12 @@ async function handleRosterGet(request, url, env) {
   const head = await env.DB.prepare('SELECT MAX(gen) AS gen FROM roster').first()
   const generatedAt = head?.gen ?? 0
   const setOk = !url.searchParams.has('set') || url.searchParams.get('set') === sig
-  if (generatedAt && setOk && Number(url.searchParams.get('since')) === generatedAt) return json({ unchanged: true, generatedAt }, 200, cors)
+  const config = await deviceConfig(env, device.id) // vai em todas as respostas: uma mudança na intranet chega ao tablet na leitura seguinte
+  if (generatedAt && setOk && Number(url.searchParams.get('since')) === generatedAt) return json({ unchanged: true, generatedAt, obra, config }, 200, cors)
 
   if (!multi) {
     const { results } = await env.DB.prepare('SELECT sage_id, name FROM roster WHERE lower(trim(obra)) = lower(?) AND active = 1 ORDER BY name LIMIT ?').bind(obra, MAX_ROSTER_LIST).all()
-    return json({ generatedAt, obra, obras, sig, workers: results.map((r) => ({ sageId: r.sage_id, name: r.name })) }, 200, cors)
+    return json({ generatedAt, obra, obras, sig, config, workers: results.map((r) => ({ sageId: r.sage_id, name: r.name })) }, 200, cors)
   }
 
   // Relógio com várias obras: todos os trabalhadores ativos dessas obras, cada um com as obras em que está autorizado hoje (só as deste relógio,
@@ -449,7 +463,7 @@ async function handleRosterGet(request, url, env) {
     bySage.set(r.sage_id, w)
   }
   const workers = [...bySage.values()].map((w) => ({ sageId: w.sageId, name: w.name, obras: obras.filter((o) => w.have.has(o)) })) // a por defeito primeiro
-  return json({ generatedAt, obra, obras, sig, workers }, 200, cors)
+  return json({ generatedAt, obra, obras, sig, config, workers }, 200, cors)
 }
 
 // ------------------------------------------------------------------ Supabase → relay: estado dos relógios
@@ -459,12 +473,73 @@ async function handleRosterGet(request, url, env) {
 async function handleDevicesStatus(request, url, env) {
   if (!(await verifySignature(request, url, '', env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
   const { results } = await env.DB.prepare(
-    'SELECT d.id, d.active, d.obra, d.last_seen, (d.pub_key IS NOT NULL) AS enrolled, (SELECT COUNT(*) FROM outbox o WHERE o.device_id = d.id) AS backlog FROM devices d ORDER BY d.id',
+    "SELECT d.id, d.active, d.obra, d.last_seen, (d.pub_key IS NOT NULL) AS enrolled, (SELECT COUNT(*) FROM outbox o WHERE o.device_id = d.id) AS backlog, (SELECT COUNT(*) FROM device_obras x WHERE x.device_id = d.id AND x.obra = '*') AS all_obras FROM devices d ORDER BY d.id",
   ).all()
   return json({
     now: Math.floor(Date.now() / 1000),
-    devices: results.map((r) => ({ id: r.id, active: r.active === 1, obra: r.obra, lastSeen: r.last_seen, enrolled: r.enrolled === 1, backlog: r.backlog })),
+    devices: results.map((r) => ({ id: r.id, active: r.active === 1, obra: r.obra, lastSeen: r.last_seen, enrolled: r.enrolled === 1, backlog: r.backlog, allObras: r.all_obras > 0 })),
   })
+}
+
+// ------------------------------------------------------------------ Supabase → relay: configuração dos relógios
+// POST /devices-config (assinado com HMAC, só o Supabase) é o que a página Time Clocks da intranet usa em vez de comandos à mão:
+//   { action: 'register', deviceId, obra, codeHash, allObras? }  cria o relógio (ou dá-lhe um código de instalação novo e reativa-o): o
+//                                                                relay guarda só o hash do código (SHA-256, 64 hex), que caduca em 7 dias
+//   { action: 'config', deviceId, obra, allObras? }              muda a obra por defeito e se serve todas as obras (linha `*` em device_obras)
+//   { action: 'revoke', deviceId }                               desativa e apaga a chave do tablet e qualquer código pendente
+//   { action: 'reactivate', deviceId }                           volta a ativar
+// O código de instalação nunca passa por aqui, só o hash. Um relógio revogado só volta a falar com um código novo (`register`).
+const CODE_VALID_S = 7 * 24 * 3600
+async function handleDevicesConfig(request, url, env) {
+  const text = await readBody(request)
+  if (text === null) return json({ error: 'too_large' }, 413)
+  if (!(await verifySignature(request, url, text, env.PULL_SECRET))) return json({ error: 'unauthorized' }, 401)
+  let body
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return json({ error: 'invalid_json' }, 400)
+  }
+  const id = body?.deviceId
+  const action = body?.action
+  const obra = typeof body?.obra === 'string' ? body.obra.trim() : ''
+  const allObras = typeof body?.allObras === 'boolean' ? body.allObras : null // null: não mexe
+  const mode = ['both', 'in', 'out'].includes(body?.mode) ? body.mode : null // função do tablet; null: não mexe
+  const mealPunches = typeof body?.mealPunches === 'boolean' ? (body.mealPunches ? 1 : 0) : null // almoço/jantar; null: não mexe
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{3,40}$/.test(id) || !['register', 'config', 'revoke', 'reactivate'].includes(action)) return json({ error: 'invalid_payload' }, 400)
+  if ((action === 'register' || action === 'config') && (!obra || obra.length > 64 || obra === ALL_OBRAS)) return json({ error: 'invalid_obra' }, 400)
+  if (action === 'register' && !/^[0-9a-f]{64}$/.test(String(body.codeHash ?? ''))) return json({ error: 'invalid_code_hash' }, 400)
+
+  const setAll = () =>
+    allObras === null
+      ? []
+      : [allObras ? env.DB.prepare('INSERT OR IGNORE INTO device_obras (device_id, obra) VALUES (?, ?)').bind(id, ALL_OBRAS) : env.DB.prepare('DELETE FROM device_obras WHERE device_id = ? AND obra = ?').bind(id, ALL_OBRAS)]
+  // função e almoço/jantar só se tocam quando vêm no pedido (a coluna nunca se escreve por engano com null)
+  const setSettings = () => [
+    ...(mode === null ? [] : [env.DB.prepare('UPDATE devices SET mode = ? WHERE id = ?').bind(mode, id)]),
+    ...(mealPunches === null ? [] : [env.DB.prepare('UPDATE devices SET meal_punches = ? WHERE id = ?').bind(mealPunches, id)]),
+  ]
+  try {
+    if (action === 'register') {
+      await env.DB.batch([
+        env.DB.prepare(
+          'INSERT INTO devices (id, token_hash, obra, code_expires) VALUES (?, ?, ?, unixepoch() + ?) ON CONFLICT(id) DO UPDATE SET token_hash = excluded.token_hash, active = 1, obra = excluded.obra, code_expires = excluded.code_expires',
+        ).bind(id, body.codeHash, obra, CODE_VALID_S),
+        ...setAll(),
+        ...setSettings(),
+      ])
+      return json({ ok: true })
+    }
+    const known = await env.DB.prepare('SELECT id FROM devices WHERE id = ?').bind(id).first()
+    if (!known) return json({ error: 'unknown_device' }, 404)
+    if (action === 'config') await env.DB.batch([env.DB.prepare('UPDATE devices SET obra = ? WHERE id = ?').bind(obra, id), ...setAll(), ...setSettings()])
+    else if (action === 'revoke') await env.DB.prepare("UPDATE devices SET active = 0, pub_key = NULL, token_hash = '' WHERE id = ?").bind(id).run()
+    else await env.DB.prepare('UPDATE devices SET active = 1 WHERE id = ?').bind(id).run()
+    return json({ ok: true })
+  } catch (e) {
+    console.error('devices-config:', e)
+    return json({ error: 'config_failed' }, 500)
+  }
 }
 
 export default {
@@ -481,6 +556,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/pull') return handlePull(request, url, env)
     if (request.method === 'POST' && url.pathname === '/ack') return handleAck(request, url, env)
     if (request.method === 'GET' && url.pathname === '/devices-status') return handleDevicesStatus(request, url, env)
+    if (request.method === 'POST' && url.pathname === '/devices-config') return handleDevicesConfig(request, url, env)
     if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true })
     return json({ error: 'not_found' }, 404)
   },

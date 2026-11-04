@@ -1,5 +1,5 @@
 import { pendingPunches, markSynced, bumpAttempts, setClockOffset, pruneSynced, markSending, clearSending, markRejected, pendingVoids, clearVoids, replaceRoster, touchRoster, rosterMeta, releaseExpiredHeld } from './db.js'
-import { isCloudConfigured } from './settings.js'
+import { isCloudConfigured, loadSettings, saveSettings } from './settings.js'
 import { relayRequest } from './relay.js'
 
 const BATCH = 50
@@ -82,6 +82,25 @@ async function flushVoids(settings) {
   }
 }
 
+// Configuração que a intranet (Time Clocks) definiu para este relógio e o relay entrega com a lista: a obra (a do relay é a que vale, o relay recusa
+// as picagens de outra), a função do tablet e o almoço/jantar. Só se aplica o que o relay trouxe: função e almoço/jantar a null (a intranet nunca os
+// definiu) deixam o que o tablet tem. Quando a intranet define a função, o tablet passa a "managed" e essas opções ficam só de leitura nas Definições.
+const MODES = ['both', 'in', 'out']
+function applyRemoteConfig(body) {
+  const cur = loadSettings()
+  const next = { ...cur }
+  const cfg = body?.config
+  if (typeof body?.obra === 'string' && body.obra.trim()) next.obra = body.obra.trim()
+  if (MODES.includes(cfg?.mode)) {
+    next.mode = cfg.mode
+    next.managed = true
+  }
+  if (typeof cfg?.mealPunches === 'boolean') next.mealPunches = cfg.mealPunches
+  if (['obra', 'mode', 'mealPunches', 'managed'].every((k) => next[k] === cur[k])) return
+  saveSettings(next)
+  window.dispatchEvent(new Event('settings-changed')) // a interface relê as definições
+}
+
 // Lista de trabalhadores da obra, lida do relay (o Supabase publica-a lá). O tablet nunca fala com o Supabase.
 // Devolve { ok, count?, unchanged?, error? }.
 export async function syncRoster(settings, { force = false } = {}) {
@@ -97,12 +116,13 @@ export async function syncRoster(settings, { force = false } = {}) {
     const res = await relayRequest(settings, 'GET', `/roster?${qs}`)
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
     const body = await res.json()
+    applyRemoteConfig(body)
     if (body.unchanged) {
       await touchRoster()
       return { ok: true, unchanged: true }
     }
     // relógio de uma só obra (ou relay antigo): `obras` com 0 ou 1 obra, sem escolha de obra; com várias, cada trabalhador traz as suas
-    await replaceRoster(body.workers ?? [], body.generatedAt, obra, body.obras, body.sig)
+    await replaceRoster(body.workers ?? [], body.generatedAt, typeof body.obra === 'string' && body.obra.trim() ? body.obra.trim() : obra, body.obras, body.sig)
     return { ok: true, count: (body.workers ?? []).length }
   } catch (e) {
     return { ok: false, error: String(e?.message || e) }
